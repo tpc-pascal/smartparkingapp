@@ -25,6 +25,7 @@ Vui lòng đọc kỹ các hướng dẫn dưới đây trước khi bắt đầ
 
 ## 📝 3. Quy chuẩn viết mã (Coding Standards)
 
+* Cài [Git LFS](https://git-lfs.com) và chạy `git lfs install` để clone được file mô hình ONNX.
 * **Nhất quán:** Tuân thủ các quy tắc đặt tên đã có sẵn trong dự án.
 * **Comment:** Giải thích các logic phức tạp, đặc biệt là phần xử lý hoặc logic.
 
