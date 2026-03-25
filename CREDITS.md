@@ -13,6 +13,7 @@ Dưới đây là danh sách các tài liệu, công cụ đã được sử d�
 |:---:|:---|:---|:---|
 | 1 | **...** | ... | [...](...) |
 | 2 | **...** | ... | [...](...) |
+| 3 | **trungdinh22** | Mô hình ONNX nhận diện biển số | [License-Plate-Recognition/model](https://github.com/trungdinh22/License-Plate-Recognition/tree/main/model) |
 </details>
 
 ## Công cụ (Tools)
