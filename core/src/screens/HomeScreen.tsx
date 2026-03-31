@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
 import GlassCard from '../components/GlassCard';
 
@@ -7,6 +7,10 @@ interface HomeScreenProps {
 }
 
 function HomeScreen({ onNavigate }: HomeScreenProps) {
+  useEffect(() => {
+    console.log('[HOME] HomeScreen mounted');
+  }, []);
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0D0D0D" />
@@ -31,14 +35,20 @@ function HomeScreen({ onNavigate }: HomeScreenProps) {
       <View style={styles.buttonRow}>
         <TouchableOpacity
           style={[styles.actionButton, styles.entryButton]}
-          onPress={() => onNavigate('Entry')}>
+          onPress={() => {
+            console.log('[HOME] User pressed "Quét xe vào"');
+            onNavigate('Entry');
+          }}>
           <Text style={styles.actionIcon}>📥</Text>
           <Text style={styles.actionText}>Quét xe vào</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.actionButton, styles.exitButton]}
-          onPress={() => onNavigate('Exit')}>
+          onPress={() => {
+            console.log('[HOME] User pressed "Quét xe ra"');
+            onNavigate('Exit');
+          }}>
           <Text style={styles.actionIcon}>📤</Text>
           <Text style={styles.actionText}>Quét xe ra</Text>
         </TouchableOpacity>

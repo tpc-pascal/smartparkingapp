@@ -1,78 +1,58 @@
-import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform, Linking } from 'react-native';
+import React from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+} from 'react-native';
+import { useCameraPermission } from 'react-native-vision-camera';
 import GlassCard from '../components/GlassCard';
 
 interface PermissionScreenProps {
   onPermissionGranted: () => void;
 }
 
-async function requestCameraPermission(): Promise<boolean> {
-  try {
-    const PermissionsAndroid = require('react-native').PermissionsAndroid;
-    const granted = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.CAMERA,
-      {
-        title: 'Quyền truy cập Camera',
-        message: 'SmartParking cần quyền truy cập camera để nhận diện biển số xe.',
-        buttonPositive: 'Cho phép',
-        buttonNegative: 'Từ chối',
-      },
-    );
-    return granted === PermissionsAndroid.RESULTS.GRANTED;
-  } catch (err) {
-    return false;
-  }
-}
-
 function PermissionScreen({ onPermissionGranted }: PermissionScreenProps) {
-  useEffect(() => {
-    checkExistingPermission();
-  }, []);
+  const { hasPermission, requestPermission } = useCameraPermission();
 
-  async function checkExistingPermission() {
-    try {
-      const { PermissionsAndroid, Platform } = require('react-native');
-      if (Platform.OS === 'android') {
-        const hasPermission = await PermissionsAndroid.check(
-          PermissionsAndroid.PERMISSIONS.CAMERA,
-        );
-        if (hasPermission) {
-          onPermissionGranted();
-        }
-      }
-    } catch (e) {
-      // ignore
+  React.useEffect(() => {
+    console.log('[PERMISSION] PermissionScreen mounted');
+    if (hasPermission) {
+      console.log('[PERMISSION] Camera permission already granted, skipping');
+      onPermissionGranted();
     }
-  }
+  }, [hasPermission, onPermissionGranted]);
 
   async function handleGrantPermission() {
-    const granted = await requestCameraPermission();
+    console.log('[PERMISSION] User pressed "Cấp quyền Camera", requesting...');
+    const granted = await requestPermission();
+    console.log(`[PERMISSION] Permission result: ${granted ? 'GRANTED' : 'DENIED'}`);
     if (granted) {
       onPermissionGranted();
-    } else {
-      Alert.alert(
-        'Cần quyền Camera',
-        'Vui lòng cấp quyền camera trong Cài đặt để sử dụng ứng dụng.',
-        [
-          { text: 'Hủy', style: 'cancel' },
-          { text: 'Mở Cài đặt', onPress: () => Linking.openSettings() },
-        ],
-      );
     }
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.icon}>📷</Text>
       <Text style={styles.title}>Quyền Camera</Text>
+
       <GlassCard style={styles.card}>
         <Text style={styles.message}>
-          SmartParking cần quyền truy cập camera sau để nhận diện biển số xe.
+          SmartParking cần quyền truy cập camera để nhận diện biển số xe một cách chính xác.
         </Text>
       </GlassCard>
-      <TouchableOpacity style={styles.button} onPress={handleGrantPermission}>
+
+      <TouchableOpacity
+        style={styles.button}
+        onPress={handleGrantPermission}
+        activeOpacity={0.7}>
         <Text style={styles.buttonText}>Cấp quyền Camera</Text>
       </TouchableOpacity>
+
+      <Text style={styles.disclaimer}>
+        Quyền camera chỉ được sử dụng trong ứng dụng và không được chia sẻ.
+      </Text>
     </View>
   );
 }
@@ -83,22 +63,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#0D0D0D',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
-  },
-  icon: {
-    fontSize: 64,
-    marginBottom: 16,
+    paddingHorizontal: 24,
   },
   title: {
     fontSize: 28,
     fontWeight: '700',
     color: '#FFFFFF',
     marginBottom: 24,
+    textAlign: 'center',
   },
   card: {
-    width: '100%',
     marginBottom: 32,
-    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
   message: {
     fontSize: 16,
@@ -108,16 +85,23 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: '#4A90D9',
-    paddingVertical: 16,
-    paddingHorizontal: 48,
-    borderRadius: 16,
-    width: '100%',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 14,
     alignItems: 'center',
+    minWidth: 200,
+    marginBottom: 20,
   },
   buttonText: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
+  },
+  disclaimer: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.5)',
+    textAlign: 'center',
+    marginTop: 16,
   },
 });
 
