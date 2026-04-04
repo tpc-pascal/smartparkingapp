@@ -7,7 +7,7 @@ import com.facebook.react.uimanager.ViewManager
 
 class LicensePlatePackage : ReactPackage {
     override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-        return listOf(LicensePlateModule(reactContext))
+        return listOf(LicensePlateModule(reactContext), DatabaseModule(reactContext), NfcModule(reactContext), SettingsModule(reactContext))
     }
 
     override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
