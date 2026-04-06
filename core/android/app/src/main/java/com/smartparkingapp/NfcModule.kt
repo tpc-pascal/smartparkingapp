@@ -17,9 +17,9 @@ import com.facebook.react.bridge.*
 
 class NfcModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
 
-    private var pendingPromise: Promise? = null
-    private var pendingWriteText: String? = null
-    private var isReadMode: Boolean = false
+    @Volatile private var pendingPromise: Promise? = null
+    @Volatile private var pendingWriteText: String? = null
+    @Volatile private var isReadMode: Boolean = false
 
     override fun getName() = "NfcModule"
 
@@ -69,9 +69,7 @@ class NfcModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(c
     fun writeNdef(text: String, promise: Promise) {
         val activity = reactApplicationContext.currentActivity
         if (!setupNfc(activity, promise)) return
-
-        isReadMode = false
-        pendingWriteText = text
+        setPending(promise, text, false)
         sendEvent("NFC_TAG_WAITING", null)
     }
 
@@ -79,8 +77,7 @@ class NfcModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(c
     fun readNdef(promise: Promise) {
         val activity = reactApplicationContext.currentActivity
         if (!setupNfc(activity, promise)) return
-
-        isReadMode = true
+        setPending(promise, null, true)
         sendEvent("NFC_TAG_WAITING", null)
     }
 
@@ -147,7 +144,6 @@ class NfcModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(c
             promise.reject("NFC_DISABLED", "NFC đang tắt")
             return false
         }
-        pendingPromise = promise
         enableForegroundDispatch(activity)
         return true
     }
@@ -203,10 +199,18 @@ class NfcModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(c
         }
     }
 
+    @Synchronized
     private fun clearPending() {
         pendingPromise = null
         pendingWriteText = null
         isReadMode = false
+    }
+
+    @Synchronized
+    private fun setPending(promise: Promise, writeText: String?, readMode: Boolean) {
+        pendingPromise = promise
+        pendingWriteText = writeText
+        isReadMode = readMode
     }
 
     private fun sendEvent(eventName: String, params: ReadableMap?) {

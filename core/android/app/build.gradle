@@ -68,6 +68,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     // Load keystore properties for release signing
     def keystorePropsFile = rootProject.file('keystore.properties')
@@ -101,14 +102,7 @@ android {
         }
     }
 
-    splits {
-        abi {
-            enable true
-            reset()
-            include "arm64-v8a"
-            universalApk false
-        }
-    }
+
 }
 
 dependencies {
@@ -135,4 +129,10 @@ dependencies {
 
     // Ktor engine for HTTP (used by React Native internals)
     implementation("io.ktor:ktor-client-android:3.1.1")
+
+    // Instrumentation test dependencies
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

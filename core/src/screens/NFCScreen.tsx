@@ -14,7 +14,8 @@ import { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../context/AuthContext';
 import { useSession } from '../context/SessionContext';
 import { writeNdef, readNdef, cancelWrite } from '../utils/nfcHelper';
-import { recordEntryFull, recordExitFull, searchParkingLogs, ParkingLogResult } from '../utils/databaseHelper';
+import { recordEntryFull, recordExitFull, searchParkingLogs, ParkingLogResult, notifySuccess } from '../utils/databaseHelper';
+import Icon from '../theme/Icon';
 
 function NFCScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -29,7 +30,6 @@ function NFCScreen() {
   const [nfcData, setNfcData] = useState('');
   const [verifiedLog, setVerifiedLog] = useState<ParkingLogResult | null>(null);
   const displayName = attendantName.split('@')[0];
-  const timestamp = new Date().toISOString();
 
   useEffect(() => {
     if (!session) {
@@ -40,17 +40,29 @@ function NFCScreen() {
   }, [session, navigation]);
 
   const handleWriteNfc = useCallback(async () => {
+    if (!session) {
+      Alert.alert('Lỗi', 'Phiên làm việc đã kết thúc');
+      navigation.goBack();
+      return;
+    }
     setStatus('waiting');
     try {
-      await writeNdef(`${attendantId}|${timestamp}|${plateText}|${session!.id}`);
+      const ts = new Date().toISOString();
+      await writeNdef(`${attendantId}|${ts}|${plateText}|${session.id}`);
       setStatus('success');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Lỗi ghi thẻ');
+      notifySuccess().catch(() => {});
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Lỗi ghi thẻ');
       setStatus('error');
     }
-  }, [attendantId, timestamp, plateText, session]);
+  }, [attendantId, plateText, session, navigation]);
 
   const handleReadNfc = useCallback(async () => {
+    if (!session) {
+      Alert.alert('Lỗi', 'Phiên làm việc đã kết thúc');
+      navigation.goBack();
+      return;
+    }
     setStatus('waiting');
     try {
       const decrypted = await readNdef();
@@ -61,14 +73,14 @@ function NFCScreen() {
         return;
       }
       const nfcSessionId = parseInt(parts[3], 10);
-      if (nfcSessionId !== session!.id) {
+      if (nfcSessionId !== session.id) {
         setErrorMsg('Thẻ NFC không thuộc phiên hiện tại');
         setStatus('error');
         return;
       }
       const nfcPlate = parts[2];
       const logs = await searchParkingLogs(nfcPlate, true);
-      const matched = logs.find(l => l.sessionId === session!.id);
+      const matched = logs.find(l => l.sessionId === session.id);
       if (!matched) {
         setErrorMsg('Không tìm thấy bản ghi xe vào tương ứng trong phiên hiện tại');
         setStatus('error');
@@ -77,8 +89,9 @@ function NFCScreen() {
       setVerifiedLog(matched);
       setNfcData(decrypted);
       setStatus('success');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Lỗi đọc thẻ');
+      notifySuccess().catch(() => {});
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Lỗi đọc thẻ');
       setStatus('error');
     }
   }, [session]);
@@ -91,16 +104,23 @@ function NFCScreen() {
   }, []);
 
   const handleEntrySuccess = useCallback(async () => {
+    if (!session) {
+      Alert.alert('Lỗi', 'Phiên làm việc đã kết thúc');
+      navigation.goBack();
+      return;
+    }
     setStatus('processing');
+    const ts = new Date().toISOString();
     try {
-      await recordEntryFull(plateText, timestamp, entryImage, session!.id);
+      await recordEntryFull(plateText, ts, entryImage, session.id);
       Alert.alert('Thành công', `Đã ghi nhận xe vào: ${plateText}`);
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
-    } catch (err: any) {
-      Alert.alert('Lỗi', err.message || 'Không thể ghi nhận');
+    } catch (err: unknown) {
+      try { await writeNdef('ERASED|0||0'); } catch { /* compensation: xoá tag nếu DB fail */ }
+      Alert.alert('Lỗi', err instanceof Error ? err.message : 'Không thể ghi nhận');
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     }
-  }, [plateText, attendantId, timestamp, entryImage, session?.id, navigation]);
+  }, [plateText, entryImage, session, navigation]);
 
   const handleExitSuccess = useCallback(async () => {
     const parts = nfcData.split('|');
@@ -113,28 +133,28 @@ function NFCScreen() {
     try {
       await recordExitFull(nfcPlate, exitImage);
       try {
-        await writeNdef('');
+        await writeNdef('ERASED|0||0');
       } catch {
         /* không block nếu xoá thẻ thất bại */
       }
       Alert.alert('Thành công', `Đã ghi nhận xe ra: ${nfcPlate}`);
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
-    } catch (err: any) {
-      Alert.alert('Lỗi', err.message || 'Không thể ghi nhận');
+    } catch (err: unknown) {
+      Alert.alert('Lỗi', err instanceof Error ? err.message : 'Không thể ghi nhận xe ra');
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     }
   }, [nfcData, exitImage, navigation]);
 
   const nfcPlate = nfcData.split('|').length >= 3 ? nfcData.split('|')[2] : '';
   const nfcTagContent = mode === 'write' && status === 'success'
-    ? `${attendantId}|${timestamp}|${plateText}|${session?.id || '?'}`
+    ? `${attendantId}|...|${plateText}|${session?.id || '?'}`
     : (mode === 'read' && status === 'success' ? nfcData : null);
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0D0D0D" />
       <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-        <Text style={styles.backText}>← Quay lại</Text>
+        <Icon name="back" size={22} color="#FFFFFF" />
       </TouchableOpacity>
 
       <View style={styles.content}>
@@ -221,7 +241,7 @@ function NFCScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0D0D0D' },
-  backButton: { position: 'absolute', top: 16, left: 16, paddingVertical: 8, paddingHorizontal: 14, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', zIndex: 10 },
+  backButton: { position: 'absolute', top: 16, left: 16, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
   backText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
   content: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, gap: 24 },
   title: { fontSize: 22, fontWeight: '700', color: '#FFFFFF', marginBottom: 8 },

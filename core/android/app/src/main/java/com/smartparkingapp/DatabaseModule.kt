@@ -7,6 +7,8 @@ import android.net.NetworkCapabilities
 import android.util.Log
 import androidx.work.*
 import com.facebook.react.bridge.*
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
 import kotlinx.coroutines.*
 import java.util.concurrent.TimeUnit
 
@@ -91,15 +93,8 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     fun registerAttendant(email: String, password: String, promise: Promise) {
         moduleScope.launch {
             try {
-                // 1. Check local SQLite
-                if (db.isEmailTaken(email)) {
-                    withContext(Dispatchers.Main) {
-                        promise.reject("EMAIL_EXISTS", "Email đã tồn tại trong hệ thống, vui lòng đăng nhập")
-                    }
-                    return@launch
-                }
-
-                // 2. Check Supabase
+                // 1. Check Supabase FIRST — account may have been deleted remotely
+                //    while stale local record still exists
                 val api = SupabaseApi()
                 val auth = api.signUp(email, password)
                 if (auth == null) {
@@ -107,6 +102,13 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                         promise.reject("EMAIL_EXISTS", "Email đã tồn tại trên hệ thống, vui lòng đăng nhập")
                     }
                     return@launch
+                }
+
+                // 2. SignUp succeeded → Supabase has no record of this email
+                //    Clean up any stale local record from a previously deleted account
+                if (db.isEmailTaken(email)) {
+                    db.deleteAttendantByEmail(email)
+                    LogBuffer.add("[DB] registerAttendant: removed stale local record for $email")
                 }
 
                 // 3. Fresh registration
@@ -120,7 +122,13 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                     db.markAttendantSyncedWithServerId(localId, serverId)
                     LogBuffer.add("[DB] Attendant pushed: serverId=$serverId")
                 } else {
-                    enqueueSync()
+                    // pushAttendant failed (e.g. unique constraint, RLS) — rollback local insert
+                    LogBuffer.add("[DB] pushAttendant failed — rolling back local insert")
+                    db.deleteAttendantAndLogs(localId)
+                    withContext(Dispatchers.Main) {
+                        promise.reject("PUSH_FAILED", "Không thể đồng bộ tài khoản lên máy chủ, vui lòng thử lại")
+                    }
+                    return@launch
                 }
                 saveSession(localId, email, auth.jwt)
 
@@ -185,10 +193,22 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                 val local = db.getAttendantByEmail(email)
 
                 if (connected && local == null) {
-                    withContext(Dispatchers.Main) { promise.reject("AUTH_FAILED", "Email không tồn tại trong hệ thống") }
+                    withContext(Dispatchers.Main) { promise.reject("EMAIL_NOT_FOUND", "Email không tồn tại trong hệ thống") }
                     return@launch
                 }
                 if (connected && local != null) {
+                    // Check if auth user was deleted remotely
+                    val uid = local.uid
+                    val jwt = local.jwtToken
+                    val authUserExists = if (uid.isNotBlank() && jwt != null) {
+                        SupabaseApi(jwt).fetchAuthUser()
+                    } else { true }
+                    if (!authUserExists) {
+                        LogBuffer.add("[DB] Login: $email has local record but auth user deleted — cleaning up")
+                        db.deleteAttendantAndLogs(local.id)
+                        withContext(Dispatchers.Main) { promise.reject("ACCOUNT_DELETED", "Tài khoản đã bị xoá khỏi máy chủ, vui lòng đăng ký lại") }
+                        return@launch
+                    }
                     withContext(Dispatchers.Main) { promise.reject("AUTH_FAILED", "Mật khẩu không đúng") }
                     return@launch
                 }
@@ -196,7 +216,7 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                 // Offline fallback (no network)
                 LogBuffer.add("[DB] Online login failed, trying offline...")
                 if (local == null) {
-                    withContext(Dispatchers.Main) { promise.reject("AUTH_FAILED", "Email không tồn tại trong hệ thống") }
+                    withContext(Dispatchers.Main) { promise.reject("EMAIL_NOT_FOUND", "Email không tồn tại trong hệ thống") }
                     return@launch
                 }
                 val inputHash = DatabaseHelper.sha256(password)
@@ -269,34 +289,31 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                 val uid = att?.uid
                 val jwt = loadJwt()
 
-                // 1. Delete local SQLite data first
+                if (uid != null && serverId != null && jwt != null) {
+                    // 1. Edge function FIRST — deletes auth.user + public data + storage
+                    val api = SupabaseApi(jwt)
+                    val fnOk = api.deleteAccountViaFunction(uid, serverId)
+                    if (!fnOk) {
+                        LogBuffer.add("[DB] deleteAccount: edge function failed — keeping local data for retry")
+                        withContext(Dispatchers.Main) {
+                            promise.reject("DELETE_FAILED", "Không thể xoá tài khoản trên máy chủ, vui lòng thử lại")
+                        }
+                        return@launch
+                    }
+                }
+
+                // 2. Edge function succeeded (or no remote data to delete) → clear local
                 if (localId != -1L) {
                     db.deleteAttendantAndLogs(localId)
                     LogBuffer.add("[DB] Local data deleted for attendant $localId")
                 }
-
-                // 2. Delete remote data
-                var remoteOk = true
-                if (jwt != null) {
-                    val api = SupabaseApi(jwt)
-                    if (serverId != null) {
-                        val deleted = api.deleteAttendant(serverId)
-                        if (!deleted) remoteOk = false
-                    }
-                    if (uid != null && serverId != null) {
-                        val fnOk = api.deleteAccountViaFunction(uid, serverId)
-                        if (!fnOk) remoteOk = false
-                    }
-                    api.signOut()
-                }
-
-                // 3. Clear session
                 prefs.edit().clear().apply()
-                LogBuffer.add("[DB] Account deleted locally=$localId remoteOk=$remoteOk")
+                if (jwt != null) { SupabaseApi(jwt).signOut() }
+
+                LogBuffer.add("[DB] Account deleted successfully")
                 withContext(Dispatchers.Main) { promise.resolve(true) }
             } catch (e: Exception) {
                 LogBuffer.add("[DB] deleteAccount exception: ${e.message}")
-                // Even if remote fails, clear local session
                 prefs.edit().clear().apply()
                 withContext(Dispatchers.Main) { promise.resolve(true) }
             }
@@ -454,12 +471,30 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
 
                 // 3. Push parking log lên server
                 val pushed = withJwtRefresh { jwt ->
-                    val log = ParkingLog(
-                        id = id, licensePlate = licensePlate, timeIn = timestamp,
-                        sessionId = sid, entryImage = entryImage
-                    )
                     val api = SupabaseApi(jwt)
-                    api.pushParkingLog(log)
+                    var sess = db.getSessionById(sid)
+                    if (sess != null && sess.serverId == null) {
+                        // Nếu session chưa được đồng bộ, đồng bộ ngay lập tức để lấy serverId
+                        val att = if (sess.attendantId > 0) db.getAttendantById(sess.attendantId) else null
+                        val serverAttId = att?.serverId
+                        val sId = api.pushSession(sess.name, sess.createdAt, sess.status, serverAttId)
+                        if (sId != null) {
+                            db.markSessionSyncedWithServerId(sess.id, sId)
+                            sess = db.getSessionById(sid)
+                            LogBuffer.add("[DB] Session synced immediately: id=${sess?.id} serverId=$sId")
+                        }
+                    }
+                    val serverSessId = sess?.serverId
+                    if (serverSessId != null) {
+                        val log = ParkingLog(
+                            id = id, licensePlate = licensePlate, timeIn = timestamp,
+                            sessionId = serverSessId, entryImage = entryImage
+                        )
+                        api.pushParkingLog(log)
+                    } else {
+                        LogBuffer.add("[DB] Cannot push parking log immediately because session server id is null")
+                        null
+                    }
                 }
                 if (pushed != null) {
                     db.markParkingLogSyncedWithServerId(id, pushed)
@@ -656,20 +691,26 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
         moduleScope.launch {
             try {
                 val localId = loadLocalId()
-                if (localId == -1L) { promise.resolve(false); return@launch }
+                if (localId == -1L) { withContext(Dispatchers.Main) { promise.resolve(false) }; return@launch }
                 val att = db.getAttendantById(localId)
-                if (att == null) { promise.resolve(false); return@launch }
-                val jwt = att.jwtToken ?: run { promise.resolve(false); return@launch }
+                if (att == null) { withContext(Dispatchers.Main) { promise.resolve(false) }; return@launch }
+                val jwt = att.jwtToken ?: run { withContext(Dispatchers.Main) { promise.resolve(false) }; return@launch }
                 val uid = att.uid
-                if (uid.isBlank()) { promise.resolve(false); return@launch }
+                if (uid.isBlank()) { withContext(Dispatchers.Main) { promise.resolve(false) }; return@launch }
                 val api = SupabaseApi(jwt)
-                val remote = api.fetchMyAttendant(uid)
-                val exists = remote != null
-                LogBuffer.add("[DB] verifySession: $uid exists=$exists on Supabase")
-                promise.resolve(exists)
+
+                val authOk = api.fetchAuthUser()
+                if (!authOk) {
+                    LogBuffer.add("[DB] verifySession: $uid NOT found in auth.users — account deleted remotely")
+                    withContext(Dispatchers.Main) { promise.resolve(false) }
+                    return@launch
+                }
+
+                LogBuffer.add("[DB] verifySession: $uid exists in auth.users")
+                withContext(Dispatchers.Main) { promise.resolve(true) }
             } catch (e: Exception) {
                 LogBuffer.add("[DB] verifySession network issue (allowing local session): ${e.message}")
-                promise.resolve(true)
+                withContext(Dispatchers.Main) { promise.resolve(true) }
             }
         }
     }
@@ -772,6 +813,10 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
 
     @ReactMethod
     fun executeSql(sql: String, promise: Promise) {
+        if (!BuildConfig.DEBUG) {
+            promise.reject("FORBIDDEN", "executeSql is only available in debug builds")
+            return
+        }
         try {
             val rdb = db.readableDatabase
             val cursor = rdb.rawQuery(sql, null)
@@ -794,6 +839,103 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
             promise.resolve(rows)
         } catch (e: Exception) {
             promise.reject("DB_ERROR", e.message)
+        }
+    }
+
+    // ── Debug Supabase ──
+
+    @ReactMethod
+    fun deleteSupabaseTable(tableName: String, promise: Promise) {
+        moduleScope.launch {
+            try {
+                val jwt = loadJwt()
+                if (jwt == null) {
+                    LogBuffer.add("[DB] deleteSupabaseTable($tableName): no JWT")
+                    withContext(Dispatchers.Main) { promise.resolve(false) }
+                    return@launch
+                }
+                val api = SupabaseApi(jwt)
+                val ok = api.deleteAllRows(tableName)
+                LogBuffer.add("[DB] deleteSupabaseTable($tableName): ok=$ok")
+                withContext(Dispatchers.Main) { promise.resolve(ok) }
+            } catch (e: Exception) {
+                LogBuffer.add("[DB] deleteSupabaseTable exception: ${e.message}")
+                withContext(Dispatchers.Main) { promise.resolve(false) }
+            }
+        }
+    }
+
+    @ReactMethod
+    fun deleteAllSupabaseTables(promise: Promise) {
+        moduleScope.launch {
+            try {
+                val jwt = loadJwt()
+                if (jwt == null) {
+                    LogBuffer.add("[DB] deleteAllSupabaseTables: no JWT")
+                    withContext(Dispatchers.Main) { promise.resolve(false) }
+                    return@launch
+                }
+                val api = SupabaseApi(jwt)
+                val ok = api.deleteAllRows("", tables = listOf("attendants", "sessions", "parking_logs"))
+                LogBuffer.add("[DB] deleteAllSupabaseTables: ok=$ok")
+                withContext(Dispatchers.Main) { promise.resolve(ok) }
+            } catch (e: Exception) {
+                LogBuffer.add("[DB] deleteAllSupabaseTables exception: ${e.message}")
+                withContext(Dispatchers.Main) { promise.resolve(false) }
+            }
+        }
+    }
+
+    @ReactMethod
+    fun clearTable(tableName: String, promise: Promise) {
+        try {
+            db.clearTable(tableName)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("DB_ERROR", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun fetchSupabaseTable(tableName: String, promise: Promise) {
+        moduleScope.launch {
+            try {
+                val result = withJwtRefresh { jwt ->
+                    val api = SupabaseApi(jwt)
+                    api.fetchTable(tableName)
+                }
+                if (result == null) {
+                    LogBuffer.add("[DB] fetchSupabaseTable($tableName): no JWT or fetch failed")
+                    withContext(Dispatchers.Main) { promise.reject("NO_AUTH", "Không thể xác thực với Supabase") }
+                    return@launch
+                }
+                val arr = result as JsonArray
+                val rows = Arguments.createArray()
+                for (elem in arr) {
+                    val obj = elem.asJsonObject
+                    val row = Arguments.createMap()
+                    for (key in obj.keySet()) {
+                        val el = obj.get(key)
+                        when {
+                            el == null || el.isJsonNull -> row.putNull(key)
+                            el.isJsonPrimitive -> {
+                                val prim = el.asJsonPrimitive
+                                when {
+                                    prim.isNumber -> row.putDouble(key, prim.asDouble)
+                                    prim.isBoolean -> row.putBoolean(key, prim.asBoolean)
+                                    else -> row.putString(key, prim.asString)
+                                }
+                            }
+                            else -> row.putString(key, el.toString())
+                        }
+                    }
+                    rows.pushMap(row)
+                }
+                withContext(Dispatchers.Main) { promise.resolve(rows) }
+            } catch (e: Exception) {
+                LogBuffer.add("[DB] fetchSupabaseTable exception: ${e.message}")
+                withContext(Dispatchers.Main) { promise.reject("DB_ERROR", e.message) }
+            }
         }
     }
 

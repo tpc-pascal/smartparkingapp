@@ -23,7 +23,11 @@ const CARD_HEIGHT = 72;
 
 function calculateFee(timeIn: string, timeOut: string | undefined): number {
   if (!timeOut) return 0;
-  const diffMs = new Date(timeOut).getTime() - new Date(timeIn).getTime();
+  const inTime = new Date(timeIn).getTime();
+  const outTime = new Date(timeOut).getTime();
+  if (isNaN(inTime) || isNaN(outTime)) return 0;
+  const diffMs = outTime - inTime;
+  if (diffMs <= 0) return 10000;
   const hours = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60)));
   return hours * 10000;
 }
@@ -39,18 +43,17 @@ function formatTime(iso: string): string {
 
 const SCREEN_W = Dimensions.get('window').width;
 
+const formatImageUri = (uri: string | null | undefined): string | undefined => {
+  if (!uri) return undefined;
+  if (uri.startsWith('http://') || uri.startsWith('https://') || uri.startsWith('file://') || uri.startsWith('data:')) {
+    return uri;
+  }
+  return `file://${uri}`;
+};
+
 const LogCard = memo(function LogCard({ item, onImagePress, colors }: { item: ParkingLogResult; onImagePress: (uri: string) => void; colors: ThemeColors }) {
   return (
     <View style={[styles.card, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-      <TouchableOpacity onPress={() => { if (item.entryImage) onImagePress(item.entryImage); }}>
-        {item.entryImage ? (
-          <Image source={{ uri: item.entryImage }} style={styles.thumb} />
-        ) : (
-          <View style={[styles.thumb, styles.thumbPlaceholder, { backgroundColor: colors.primaryLight }]}>
-            <Icon name="car" size={20} color={colors.primary} />
-          </View>
-        )}
-      </TouchableOpacity>
       <View style={styles.cardBody}>
         <Text style={[styles.plateText, { color: colors.text }]}>{item.licensePlate}</Text>
         <Text style={[styles.timeText, { color: colors.textSecondary }]}>Vào: {formatTime(item.timeIn)}</Text>
@@ -108,7 +111,7 @@ function HistoryScreen() {
     setLoading(false);
   }, [fetchLogs]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -130,7 +133,9 @@ function HistoryScreen() {
     pageRef.current.filter = f;
     pageRef.current.hasMore = true;
     setOffset(0);
-    searchParkingLogs('', f === 'parked', 0, PAGE_SIZE).then(r => setLogs(r)).catch(() => {});
+    (async () => {
+      try { setLogs(await searchParkingLogs('', f === 'parked', 0, PAGE_SIZE)); } catch {}
+    })();
   }, []);
 
   const handleLoadMore = useCallback(() => {

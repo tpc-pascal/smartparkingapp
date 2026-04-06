@@ -62,7 +62,14 @@ function LoginScreen() {
   }, [email, password, confirmPassword, mode]);
 
   async function handleSubmit() {
-    if (!validate()) return;
+    if (!validate()) {
+      if (mode === 'login' && !password.trim()) {
+        setPassword('');
+        setServerError('Mật khẩu không đúng');
+        setFieldErrors({});
+      }
+      return;
+    }
     setLoading(true);
     setServerError('');
     try {
@@ -73,15 +80,24 @@ function LoginScreen() {
       } else {
         await registerAttendant(email.trim(), password);
         Alert.alert('Thành công', `Đã đăng ký tài khoản ${email.trim()}`);
+        setPassword('');
+        setConfirmPassword('');
         setMode('login');
       }
-    } catch (err: any) {
-      if (err.code === 'EMAIL_EXISTS') {
-        Alert.alert('Thông báo', err.message, [
+    } catch (err: unknown) {
+      const error = err as { code?: string; message?: string };
+      setPassword('');
+      setConfirmPassword('');
+      if (error.code === 'EMAIL_EXISTS') {
+        Alert.alert('Thông báo', error.message || 'Email đã tồn tại, vui lòng đăng nhập', [
           { text: 'Đăng nhập', onPress: () => setMode('login') }
         ]);
+      } else if (error.code === 'EMAIL_NOT_FOUND' || error.code === 'ACCOUNT_DELETED') {
+        Alert.alert('Thông báo', error.message || 'Tài khoản chưa tồn tại', [
+          { text: 'Đăng ký', onPress: () => setMode('register') }
+        ]);
       } else {
-        setServerError(err.message || 'Đã có lỗi xảy ra');
+        setServerError(error.message || 'Đã có lỗi xảy ra');
       }
     } finally {
       setLoading(false);

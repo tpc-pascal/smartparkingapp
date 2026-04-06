@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   BackHandler,
+  Alert,
 } from 'react-native';
 import { useCameraPermission } from 'react-native-vision-camera';
 import { useTheme } from '../theme/ThemeContext';
@@ -48,7 +49,14 @@ function PermissionScreen() {
 
   async function handleCheckNetwork() {
     setChecking(true);
-    try { await isOnline(); } catch {}
+    try {
+      const online = await isOnline();
+      if (!online) {
+        Alert.alert('Mạng không khả dụng', 'Vui lòng kiểm tra kết nối mạng');
+        setChecking(false);
+        return;
+      }
+    } catch {}
     setChecking(false);
     setNetworkChecked(true);
   }

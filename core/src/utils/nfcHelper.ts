@@ -19,7 +19,7 @@ export async function openNfcSettings(): Promise<void> {
 
 export async function writeNdef(text: string): Promise<void> {
   if (!NfcModule) throw new Error('NfcModule not available');
-  await NfcModule.writeNdef(text);
+  await withTimeout(NfcModule.writeNdef(text), NFC_TIMEOUT, 'Hết thời gian ghi thẻ NFC');
 }
 
 const NFC_TIMEOUT = 30000;
@@ -43,7 +43,7 @@ export async function cancelWrite(): Promise<void> {
   await NfcModule.cancelWrite();
 }
 
-export function addNfcListener(event: string, handler: (data: any) => void) {
+export function addNfcListener(event: string, handler: (data: unknown) => void) {
   const sub = DeviceEventEmitter.addListener(event, handler);
   return () => sub.remove();
 }

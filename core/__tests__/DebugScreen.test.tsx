@@ -6,6 +6,16 @@ jest.mock('../src/utils/databaseHelper', () => ({
   getDebugLogs: jest.fn(),
   dumpDatabase: jest.fn(),
   clearAllTables: jest.fn(),
+  fetchSupabaseTable: jest.fn(),
+  triggerSync: jest.fn(),
+  executeSql: jest.fn(),
+  deleteSupabaseTable: jest.fn(),
+  deleteAllSupabaseTables: jest.fn(),
+  clearTable: jest.fn(),
+}));
+
+jest.mock('../src/utils/consoleCapture', () => ({
+  getCapturedLogs: jest.fn(() => []),
 }));
 
 jest.mock('../src/theme/ThemeContext', () => ({
@@ -32,10 +42,10 @@ it('renders debug title', () => {
   expect(getByText('Debug')).toBeTruthy();
 });
 
-it('renders log and database tabs', () => {
+it('renders log and tabs', () => {
   const { getByText } = render(<DebugScreen />);
   expect(getByText('Log')).toBeTruthy();
-  expect(getByText('SQLite')).toBeTruthy();
+  expect(getByText('Server')).toBeTruthy();
 });
 
 it('loads logs on mount', async () => {

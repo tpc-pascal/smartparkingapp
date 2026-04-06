@@ -3,7 +3,23 @@ jest.mock('react-native-vector-icons/Feather', () => 'Feather');
 jest.mock('react-native-vision-camera', () => ({
   Camera: 'Camera',
   useCameraDevice: () => ({ id: 'back' }),
+  useCameraPermission: () => ({ requestPermission: jest.fn().mockResolvedValue(true) }),
+  useFrameProcessor: jest.fn().mockReturnValue({ frameProcessor: jest.fn(), type: 'readonly' }),
+  runAtTargetFps: jest.fn((_fps, func) => func()),
+  VisionCameraProxy: {
+    initFrameProcessorPlugin: jest.fn().mockReturnValue(undefined),
+  },
 }));
+
+jest.mock('react-native-worklets-core', () => ({
+  Worklets: {
+    runOnJS: jest.fn(),
+    createSharedValue: jest.fn(() => ({ value: false })),
+    createContext: jest.fn(() => ({ createRunAsync: jest.fn() })),
+    defaultContext: { runAsync: jest.fn() },
+  },
+}));
+
 jest.mock('react-native-reanimated', () => {
   const Reanimated = require('react-native-reanimated/mock');
   Reanimated.default.View = 'View';
@@ -37,13 +53,6 @@ jest.mock('@react-navigation/native-stack', () => ({
     Group: ({ children }) => children,
   }),
 }));
-
-jest.mock('react-native-vision-camera', () => ({
-  Camera: 'Camera',
-  useCameraDevice: () => ({ id: 'back' }),
-  useCameraPermission: () => ({ requestPermission: jest.fn().mockResolvedValue(true) }),
-}));
-
 
 global.__mockNavigate = mockNavigate;
 global.__mockReplace = mockReplace;

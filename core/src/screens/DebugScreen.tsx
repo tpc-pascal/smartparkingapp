@@ -12,10 +12,13 @@ import {
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
-import { getDebugLogs, dumpDatabase, clearAllTables, executeSql } from '../utils/databaseHelper';
+import { getDebugLogs, dumpDatabase, clearAllTables, executeSql, fetchSupabaseTable, triggerSync, deleteSupabaseTable, deleteAllSupabaseTables, clearTable } from '../utils/databaseHelper';
 import { getCapturedLogs } from '../utils/consoleCapture';
+import Icon from '../theme/Icon';
 
-type ScreenTab = 'log' | 'js' | 'sqlite';
+type ScreenTab = 'log' | 'js' | 'server';
+type ServerSub = 'sqlite' | 'supabase';
+type SqlRow = Record<string, unknown>;
 
 const PRESETS = [
   { label: 'attendants', sql: 'SELECT * FROM attendants ORDER BY id DESC LIMIT 20' },
@@ -24,19 +27,27 @@ const PRESETS = [
   { label: 'sqlite_master', sql: "SELECT name, type, sql FROM sqlite_master WHERE type='table' ORDER BY name" },
 ];
 
+const SUPABASE_PRESETS = ['attendants', 'sessions', 'parking_logs'];
+
 function DebugScreen() {
   const { colors } = useTheme();
   const navigation = useNavigation();
-  const listRef = useRef<FlatList>(null);
+  const listRef = useRef<FlatList<string>>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [tab, setTab] = useState<ScreenTab>('log');
+  const [serverSub, setServerSub] = useState<ServerSub>('sqlite');
   const [nativeLogs, setNativeLogs] = useState<string[]>([]);
   const [jsLogs, setJsLogs] = useState<{ level: string; message: string; timestamp: string }[]>([]);
-  const [sqlRows, setSqlRows] = useState<any[]>([]);
+  const [sqlRows, setSqlRows] = useState<SqlRow[]>([]);
   const [sqlCols, setSqlCols] = useState<string[]>([]);
   const [customSql, setCustomSql] = useState('');
   const [currentSql, setCurrentSql] = useState('');
+
+  const [supaRows, setSupaRows] = useState<SqlRow[]>([]);
+  const [supaCols, setSupaCols] = useState<string[]>([]);
+  const [supaLoading, setSupaLoading] = useState(false);
+  const [supaTable, setSupaTable] = useState('');
 
   const loadNativeLogs = useCallback(async () => {
     try {
@@ -52,10 +63,11 @@ function DebugScreen() {
     let text = '';
     if (tab === 'log') text = nativeLogs.join('\n');
     else if (tab === 'js') text = jsLogs.map(l => `[${l.level.toUpperCase()}] ${l.timestamp} ${l.message}`).join('\n');
+    else if (serverSub === 'supabase') text = JSON.stringify(supaRows, null, 2);
     else text = JSON.stringify(sqlRows, null, 2);
-    Clipboard.setString(text);
+    if (Clipboard?.setString) { try { Clipboard.setString(text); } catch {} }
     Alert.alert('Đã copy', `${text.split('\n').length} dòng`);
-  }, [tab, nativeLogs, jsLogs, sqlRows]);
+  }, [tab, serverSub, nativeLogs, jsLogs, sqlRows, supaRows]);
 
   const handleClearNative = useCallback(async () => {
     const { NativeModules } = require('react-native');
@@ -74,7 +86,7 @@ function DebugScreen() {
             setSqlRows([]);
             setSqlCols([]);
             setTimeout(() => navigation.goBack(), 1000);
-          } catch (err: any) { Alert.alert('Lỗi', err.message); }
+          } catch (err: unknown) { Alert.alert('Lỗi', err instanceof Error ? err.message : 'Lỗi không xác định'); }
         },
       },
     ]);
@@ -83,14 +95,82 @@ function DebugScreen() {
   const runSql = useCallback(async (sql: string) => {
     try {
       setCurrentSql(sql);
-      const rows: any[] = await executeSql(sql);
+      const rows: SqlRow[] = await executeSql(sql);
       if (rows.length > 0) setSqlCols(Object.keys(rows[0]));
       else setSqlCols([]);
       setSqlRows(rows);
-    } catch (err: any) {
-      Alert.alert('SQL Error', err.message);
+    } catch (err: unknown) {
+      Alert.alert('SQL Error', err instanceof Error ? err.message : 'Lỗi không xác định');
     }
   }, []);
+
+  const fetchSupa = useCallback(async (tableName: string) => {
+    setSupaLoading(true);
+    setSupaTable(tableName);
+    try {
+      const rows: SqlRow[] = await fetchSupabaseTable(tableName);
+      if (rows.length > 0) setSupaCols(Object.keys(rows[0]));
+      else setSupaCols([]);
+      setSupaRows(rows);
+    } catch (err: unknown) {
+      Alert.alert('Supabase Error', err instanceof Error ? err.message : 'Lỗi không xác định');
+      setSupaRows([]);
+      setSupaCols([]);
+    } finally {
+      setSupaLoading(false);
+    }
+  }, []);
+
+  const handleClearTable = useCallback((tableName: string) => {
+    Alert.alert(`Xóa ${tableName}?`, `Dữ liệu SQLite trong bảng ${tableName} sẽ bị xóa.`, [
+      { text: 'Hủy', style: 'cancel' },
+      {
+        text: 'Xác nhận', style: 'destructive',
+        onPress: async () => {
+          try {
+            await clearTable(tableName);
+            setSqlRows([]);
+            setSqlCols([]);
+          } catch (err: unknown) { Alert.alert('Lỗi', err instanceof Error ? err.message : 'Lỗi không xác định'); }
+        },
+      },
+    ]);
+  }, []);
+
+  const handleDeleteSupaTable = useCallback((tableName: string) => {
+    Alert.alert(`Xóa ${tableName} trên Supabase?`, 'Dữ liệu sẽ bị xóa vĩnh viễn.', [
+      { text: 'Hủy', style: 'cancel' },
+      {
+        text: 'Xác nhận', style: 'destructive',
+        onPress: async () => {
+          const ok = await deleteSupabaseTable(tableName);
+          if (ok) { setSupaRows([]); setSupaCols([]); }
+          else { Alert.alert('Lỗi', 'Không thể xóa bảng trên Supabase'); }
+        },
+      },
+    ]);
+  }, []);
+
+  const handleDeleteAllSupa = useCallback(() => {
+    Alert.alert('Xóa tất cả Supabase?', 'attendants + sessions + parking_logs sẽ bị xóa.', [
+      { text: 'Hủy', style: 'cancel' },
+      {
+        text: 'Xác nhận', style: 'destructive',
+        onPress: async () => {
+          const ok = await deleteAllSupabaseTables();
+          if (ok) { setSupaRows([]); setSupaCols([]); }
+          else { Alert.alert('Lỗi', 'Không thể xóa bảng trên Supabase'); }
+        },
+      },
+    ]);
+  }, []);
+
+  const handleSyncThenFetch = useCallback(async (tableName: string) => {
+    try {
+      await triggerSync();
+    } catch {}
+    fetchSupa(tableName);
+  }, [fetchSupa]);
 
   useEffect(() => {
     loadNativeLogs();
@@ -101,7 +181,8 @@ function DebugScreen() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [tab, loadNativeLogs, loadJsLogs]);
 
-  useEffect(() => { if (tab === 'sqlite' && !currentSql) runSql(PRESETS[0].sql); }, [tab, currentSql, runSql]);
+  useEffect(() => { if (tab === 'server' && serverSub === 'sqlite' && !currentSql) runSql(PRESETS[0].sql); }, [tab, serverSub, currentSql, runSql]);
+  useEffect(() => { if (tab === 'server' && serverSub === 'supabase' && !supaTable) fetchSupa(SUPABASE_PRESETS[0]); }, [tab, serverSub, supaTable, fetchSupa]);
 
   const renderLog = ({ item }: { item: string }) => (
     <Text style={styles.logLine}>{item}</Text>
@@ -117,15 +198,17 @@ function DebugScreen() {
     );
   };
 
-  const renderSqlRow = ({ item }: { item: any }) => (
+  const renderTableRow = (cols: string[], item: SqlRow) => (
     <View style={styles.sqlRow}>
-      {sqlCols.map(col => (
+      {cols.map(col => (
         <Text key={col} style={styles.sqlCell} numberOfLines={2}>
           {item[col] === null || item[col] === undefined ? 'NULL' : String(item[col])}
         </Text>
       ))}
     </View>
   );
+
+  const isServer = tab === 'server';
 
   return (
     <View style={[styles.container, { backgroundColor: '#0D0D0D' }]}>
@@ -134,11 +217,14 @@ function DebugScreen() {
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: 'rgba(255,255,255,0.08)' }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={[styles.backText, { color: colors.primary }]}>← Đóng</Text>
+          <Icon name="back" size={22} color={colors.primary} />
         </TouchableOpacity>
-        <Text style={styles.title}>Debug</Text>
+        <View style={styles.titleRow}>
+          <Icon name="bug" size={18} color="#FFFFFF" />
+          <Text style={styles.title}>Debug</Text>
+        </View>
         <View style={styles.headerRight}>
-          {tab === 'sqlite' && (
+          {isServer && serverSub === 'sqlite' && (
             <TouchableOpacity onPress={handleClearDb} style={[styles.headerBtn, styles.dangerBtn]}>
               <Text style={styles.dangerBtnText}>Xóa DB</Text>
             </TouchableOpacity>
@@ -154,32 +240,55 @@ function DebugScreen() {
         </View>
       </View>
 
-      {/* Tabs */}
+      {/* Top tabs */}
       <View style={[styles.tabBar, { borderBottomColor: 'rgba(255,255,255,0.08)' }]}>
-        {(['log', 'js', 'sqlite'] as ScreenTab[]).map(t => (
+        {(['log', 'js', 'server'] as ScreenTab[]).map(t => (
           <TouchableOpacity
             key={t}
             style={[styles.tab, tab === t && { borderBottomColor: colors.primary }]}
             onPress={() => setTab(t)}
           >
             <Text style={[styles.tabText, tab === t && { color: colors.primary }]}>
-              {t === 'log' ? 'Log' : t === 'js' ? 'JS Console' : 'SQLite'}
+              {t === 'log' ? 'Log' : t === 'js' ? 'JS Console' : 'Server'}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
+      {/* Server sub-tabs */}
+      {isServer && (
+        <View style={[styles.subTabBar, { borderBottomColor: 'rgba(255,255,255,0.08)' }]}>
+          {(['sqlite', 'supabase'] as ServerSub[]).map(s => (
+            <TouchableOpacity
+              key={s}
+              style={[styles.subTab, serverSub === s && { borderBottomColor: colors.primary }]}
+              onPress={() => setServerSub(s)}
+            >
+              <Text style={[styles.subTabText, serverSub === s && { color: colors.primary }]}>
+                {s === 'sqlite' ? 'SQLite' : 'Supabase'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
       {/* SQL preset buttons */}
-      {tab === 'sqlite' && (
+      {isServer && serverSub === 'sqlite' && (
         <View style={[styles.presetBar, { borderBottomColor: 'rgba(255,255,255,0.08)' }]}>
           {PRESETS.map(p => (
-            <TouchableOpacity
-              key={p.label}
-              style={[styles.presetBtn, currentSql === p.sql && styles.presetBtnActive]}
-              onPress={() => runSql(p.sql)}
-            >
-              <Text style={[styles.presetText, currentSql === p.sql && styles.presetTextActive]}>{p.label}</Text>
-            </TouchableOpacity>
+            <View key={p.label} style={styles.presetWithDelete}>
+              <TouchableOpacity
+                style={[styles.presetBtn, currentSql === p.sql && styles.presetBtnActive]}
+                onPress={() => runSql(p.sql)}
+              >
+                <Text style={[styles.presetText, currentSql === p.sql && styles.presetTextActive]}>{p.label}</Text>
+              </TouchableOpacity>
+              {p.label !== 'sqlite_master' && (
+                <TouchableOpacity style={styles.deleteSmallBtn} onPress={() => handleClearTable(p.label)}>
+                  <Text style={styles.deleteSmallText}>×</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           ))}
           <View style={styles.customSqlRow}>
             <TextInput
@@ -198,10 +307,42 @@ function DebugScreen() {
         </View>
       )}
 
-      {/* Column headers for SQLite */}
-      {tab === 'sqlite' && sqlCols.length > 0 && (
+      {/* Supabase preset buttons */}
+      {isServer && serverSub === 'supabase' && (
+        <View style={[styles.presetBar, { borderBottomColor: 'rgba(255,255,255,0.08)' }]}>
+          {SUPABASE_PRESETS.map(t => (
+            <View key={t} style={styles.presetWithDelete}>
+              <TouchableOpacity
+                style={[styles.presetBtn, supaTable === t && styles.presetBtnActive]}
+                onPress={() => fetchSupa(t)}
+              >
+                <Text style={[styles.presetText, supaTable === t && styles.presetTextActive]}>{t}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteSmallBtn} onPress={() => handleDeleteSupaTable(t)}>
+                <Text style={styles.deleteSmallText}>×</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+          <TouchableOpacity style={[styles.presetBtn, { backgroundColor: 'rgba(16,185,129,0.2)' }]} onPress={() => handleSyncThenFetch(supaTable || SUPABASE_PRESETS[0])}>
+            <Text style={[styles.presetText, { color: '#10B981' }]}>Sync + Fetch</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.presetBtn, { backgroundColor: 'rgba(231,76,60,0.2)' }]} onPress={handleDeleteAllSupa}>
+            <Text style={[styles.presetText, { color: '#E74C3C' }]}>Xoá tất cả</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Column headers */}
+      {isServer && serverSub === 'sqlite' && sqlCols.length > 0 && (
         <View style={styles.colHeader}>
           {sqlCols.map(col => (
+            <Text key={col} style={styles.colHeaderText} numberOfLines={1}>{col}</Text>
+          ))}
+        </View>
+      )}
+      {isServer && serverSub === 'supabase' && supaCols.length > 0 && (
+        <View style={styles.colHeader}>
+          {supaCols.map(col => (
             <Text key={col} style={styles.colHeaderText} numberOfLines={1}>{col}</Text>
           ))}
         </View>
@@ -229,13 +370,25 @@ function DebugScreen() {
         />
       )}
 
-      {tab === 'sqlite' && (
+      {isServer && serverSub === 'sqlite' && (
         <FlatList
           data={sqlRows}
           keyExtractor={(_, i) => i.toString()}
-          renderItem={renderSqlRow}
+          renderItem={({ item }) => renderTableRow(sqlCols, item)}
           contentContainerStyle={styles.list}
           ListEmptyComponent={<Text style={styles.emptyText}>No results</Text>}
+        />
+      )}
+
+      {isServer && serverSub === 'supabase' && (
+        <FlatList
+          data={supaRows}
+          keyExtractor={(_, i) => i.toString()}
+          renderItem={({ item }) => renderTableRow(supaCols, item)}
+          contentContainerStyle={styles.list}
+          ListEmptyComponent={
+            <Text style={styles.emptyText}>{supaLoading ? 'Loading...' : 'No results'}</Text>
+          }
         />
       )}
     </View>
@@ -249,6 +402,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1,
   },
   backText: { fontSize: 15, fontWeight: '600' },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   title: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   headerRight: { flexDirection: 'row', gap: 10 },
   headerBtn: { paddingVertical: 4, paddingHorizontal: 10, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 8 },
@@ -258,12 +412,21 @@ const styles = StyleSheet.create({
   tabBar: { flexDirection: 'row', borderBottomWidth: 1 },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabText: { color: 'rgba(255,255,255,0.4)', fontSize: 14, fontWeight: '600' },
+  subTabBar: { flexDirection: 'row', borderBottomWidth: 1, paddingHorizontal: 40 },
+  subTab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  subTabText: { color: 'rgba(255,255,255,0.3)', fontSize: 12, fontWeight: '600' },
   presetBar: {
     flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 10, paddingVertical: 8, gap: 6, borderBottomWidth: 1,
   },
+  presetWithDelete: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   presetBtn: {
     paddingVertical: 4, paddingHorizontal: 10, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 6,
   },
+  deleteSmallBtn: {
+    width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(231,76,60,0.3)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  deleteSmallText: { color: '#E74C3C', fontSize: 14, fontWeight: '700', lineHeight: 16 },
   presetBtnActive: { backgroundColor: 'rgba(59,130,246,0.3)' },
   presetText: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: '600' },
   presetTextActive: { color: '#3B82F6' },

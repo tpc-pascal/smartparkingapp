@@ -22,24 +22,7 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
     loadReactNative(this)
-    schedulePeriodicSync()
     scheduleBootSync()
-  }
-
-  private fun schedulePeriodicSync() {
-    val constraints = Constraints.Builder()
-      .setRequiredNetworkType(NetworkType.CONNECTED)
-      .build()
-
-    val syncRequest = PeriodicWorkRequestBuilder<SyncWorker>(1, TimeUnit.MINUTES)
-      .setConstraints(constraints)
-      .build()
-
-    WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-      "periodic_sync",
-      ExistingPeriodicWorkPolicy.KEEP,
-      syncRequest
-    )
   }
 
   private fun scheduleBootSync() {

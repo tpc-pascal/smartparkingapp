@@ -19,6 +19,7 @@ function SettingsScreen() {
   const [vibDuration, setVibDuration] = useState(100);
   const [sndEnabled, setSndEnabled] = useState(true);
   const [sndVolume, setSndVolume] = useState(80);
+  const [showCharBboxes, setShowCharBboxes] = useState(false);
 
   function confirmDelete() {
     Alert.alert(
@@ -33,16 +34,18 @@ function SettingsScreen() {
 
   useEffect(() => {
     (async () => {
-      const [vib, snd, v, s] = await Promise.all([
+      const [vib, snd, v, s, charBbox] = await Promise.all([
         getSettingBool('vibration_enabled'),
         getSettingBool('sound_enabled'),
         getSettingInt('vibration_duration'),
         getSettingInt('sound_volume'),
+        getSettingBool('show_char_bboxes'),
       ]);
       setVibEnabled(vib !== false);
       setSndEnabled(snd !== false);
       if (v !== null) setVibDuration(v);
       if (s !== null) setSndVolume(s);
+      setShowCharBboxes(charBbox === true);
     })();
   }, []);
 
@@ -144,6 +147,25 @@ function SettingsScreen() {
               <Text style={[s.sliderLabel, { color: colors.textSecondary }]}>To</Text>
             </View>
           )}
+        </View>
+      </View>
+
+      <View style={s.section}>
+        <Text style={[s.sectionTitle, { color: colors.textMuted }]}>HIỂN THỊ</Text>
+        <View style={[s.card, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+          <RowItem
+            colors={colors}
+            icon={<Icon name="dot" size={20} color={colors.primary} />}
+            label="Bounding box ký tự"
+            control={
+              <Switch
+                value={showCharBboxes}
+                onValueChange={async (v) => { setShowCharBboxes(v); await setSettingBool('show_char_bboxes', v); }}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor="#FFFFFF"
+              />
+            }
+          />
         </View>
       </View>
     </View>

@@ -56,7 +56,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
 ) {
     companion object {
         private const val DATABASE_NAME = "smartparking.db"
-        private const val DATABASE_VERSION = 13
+        private const val DATABASE_VERSION = 14
 
         private const val TABLE_ATTENDANTS = "attendants"
         private const val TABLE_PARKING_LOGS = "parking_logs"
@@ -83,8 +83,17 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
         private const val COL_CREATED_AT = "created_at"
         private const val COL_ENDED_AT = "ended_at"
 
-        private val DATE_FMT = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-        fun formatNow() = DATE_FMT.format(Date())
+        private val dateFmt = ThreadLocal<SimpleDateFormat>()
+
+        private fun getDateFormat(): SimpleDateFormat {
+            var fmt = dateFmt.get()
+            if (fmt == null) {
+                fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+                dateFmt.set(fmt)
+            }
+            return fmt
+        }
+        fun formatNow() = getDateFormat().format(Date())
         fun todayStart() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + "T00:00:00Z"
         fun todayEnd() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + "T23:59:59Z"
         fun sha256(input: String): String {
@@ -141,6 +150,9 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
                 $COL_ATTENDANT_ID INTEGER NOT NULL DEFAULT 0
             )
         """)
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sess_status ON $TABLE_SESSIONS($COL_SESSION_STATUS)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sess_attendant ON $TABLE_SESSIONS($COL_ATTENDANT_ID)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_sess_created ON $TABLE_SESSIONS($COL_CREATED_AT)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -236,6 +248,11 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_logs_synced ON parking_logs(is_synced)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_logs_server ON parking_logs(server_id)")
         }
+        if (oldVersion < 14) {
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_sess_status ON $TABLE_SESSIONS($COL_SESSION_STATUS)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_sess_attendant ON $TABLE_SESSIONS($COL_ATTENDANT_ID)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_sess_created ON $TABLE_SESSIONS($COL_CREATED_AT)")
+        }
     }
 
     // ── Attendant ──
@@ -244,6 +261,11 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
         val db = readableDatabase
         val cursor = db.rawQuery("SELECT COUNT(*) FROM $TABLE_ATTENDANTS WHERE $COL_EMAIL = ?", arrayOf(email))
         return cursor.use { it.moveToFirst() && it.getInt(0) > 0 }
+    }
+
+    fun deleteAttendantByEmail(email: String) {
+        val db = writableDatabase
+        db.delete(TABLE_ATTENDANTS, "$COL_EMAIL = ?", arrayOf(email))
     }
 
     fun insertAttendant(uid: String?, email: String): Long {
@@ -352,28 +374,59 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
     fun recordExit(licensePlate: String, exitImage: String? = null): Int {
         val db = writableDatabase
         val timeOut = formatNow()
-        val cursor = db.query(TABLE_PARKING_LOGS, arrayOf(COL_TIME_IN),
-            "$COL_LICENSE_PLATE = ? AND $COL_TIME_OUT IS NULL",
-            arrayOf(licensePlate), null, null, null)
-        val timeIn = cursor.use {
-            if (it.moveToFirst()) it.getString(it.getColumnIndexOrThrow(COL_TIME_IN)) else null
+        db.beginTransaction()
+        try {
+            val cursor = db.query(TABLE_PARKING_LOGS, arrayOf(COL_TIME_IN),
+                "$COL_LICENSE_PLATE = ? AND $COL_TIME_OUT IS NULL",
+                arrayOf(licensePlate), null, null, null)
+            val timeIn = cursor.use {
+                if (it.moveToFirst()) it.getString(it.getColumnIndexOrThrow(COL_TIME_IN)) else null
+            }
+            val fee = if (timeIn != null) calculateFee(timeIn, timeOut) else 0
+            val values = ContentValues().apply {
+                put(COL_TIME_OUT, timeOut)
+                if (exitImage != null) put(COL_EXIT_IMAGE, exitImage)
+                put(COL_FEE, fee)
+                put(COL_IS_SYNCED, 0)
+            }
+            val rows = db.update(TABLE_PARKING_LOGS, values,
+                "$COL_LICENSE_PLATE = ? AND $COL_TIME_OUT IS NULL",
+                arrayOf(licensePlate))
+            db.setTransactionSuccessful()
+            return rows
+        } finally {
+            db.endTransaction()
         }
-        val fee = if (timeIn != null) calculateFee(timeIn, timeOut) else 0
-        val values = ContentValues().apply {
-            put(COL_TIME_OUT, timeOut)
-            if (exitImage != null) put(COL_EXIT_IMAGE, exitImage)
-            put(COL_FEE, fee)
-            put(COL_IS_SYNCED, 0)
+    }
+
+    private fun parseIsoDate(dateStr: String): Long? {
+        val cleanStr = dateStr.trim()
+        val formats = arrayOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss"
+        )
+        for (fmt in formats) {
+            try {
+                val sdf = SimpleDateFormat(fmt, Locale.US)
+                if (fmt.contains("Z") || fmt.contains("XXX")) {
+                    sdf.timeZone = TimeZone.getTimeZone("UTC")
+                }
+                val d = sdf.parse(cleanStr)
+                if (d != null) return d.time
+            } catch (e: Exception) {
+                // Try next
+            }
         }
-        return db.update(TABLE_PARKING_LOGS, values,
-            "$COL_LICENSE_PLATE = ? AND $COL_TIME_OUT IS NULL",
-            arrayOf(licensePlate))
+        return null
     }
 
     private fun calculateFee(timeIn: String, timeOut: String): Int {
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-        val inTime = sdf.parse(timeIn)?.time ?: return 0
-        val outTime = sdf.parse(timeOut)?.time ?: return 0
+        val inTime = parseIsoDate(timeIn) ?: return 0
+        val outTime = parseIsoDate(timeOut) ?: return 0
         val diffMs = outTime - inTime
         val hours = max(1, ceil(diffMs / (1000.0 * 60 * 60)).toInt())
         return hours * 10000
@@ -569,6 +622,11 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
         db.delete(TABLE_ATTENDANTS, "$COL_ID = ?", arrayOf(localId.toString()))
     }
 
+    fun clearTable(tableName: String) {
+        val db = writableDatabase
+        db.delete(tableName, null, null)
+    }
+
     fun clearAllTables() {
         val db = writableDatabase
         db.beginTransaction()
@@ -611,51 +669,60 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
     }
 
     fun getOrCreateActiveSession(attendantId: Long): Pair<Session, String?> {
-        val rdb = readableDatabase
-        val wdb = writableDatabase
-
-        // 1. Try today's active session
-        var cursor = rdb.rawQuery(
-            "SELECT * FROM $TABLE_SESSIONS WHERE $COL_SESSION_STATUS = 'active' AND date($COL_CREATED_AT) = date('now') ORDER BY $COL_CREATED_AT DESC LIMIT 1",
-            null
-        )
-        cursor.use {
-            if (it.moveToFirst()) return Pair(sessionFromCursor(it), null)
-        }
-
-        // 2. Close any old active sessions (cross-day)
-        val oldSessions = mutableListOf<Session>()
-        cursor = rdb.rawQuery(
-            "SELECT * FROM $TABLE_SESSIONS WHERE $COL_SESSION_STATUS = 'active' ORDER BY $COL_CREATED_AT DESC",
-            null
-        )
-        cursor.use {
-            while (it.moveToNext()) oldSessions.add(sessionFromCursor(it))
-        }
-
-        val closedOldSessionName = oldSessions.firstOrNull()?.name
-
-        for (sess in oldSessions) {
-            val values = ContentValues().apply {
-                put(COL_SESSION_STATUS, "closed")
-                put(COL_ENDED_AT, formatNow())
-                put(COL_IS_SYNCED, 0)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            // 1. Try today's active session
+            val cursor = db.rawQuery(
+                "SELECT * FROM $TABLE_SESSIONS WHERE $COL_SESSION_STATUS = 'active' AND date($COL_CREATED_AT) = date('now') ORDER BY $COL_CREATED_AT DESC LIMIT 1",
+                null
+            )
+            cursor.use {
+                if (it.moveToFirst()) {
+                    val session = sessionFromCursor(it)
+                    db.setTransactionSuccessful()
+                    return Pair(session, null)
+                }
             }
-            wdb.update(TABLE_SESSIONS, values, "$COL_ID = ?", arrayOf(sess.id.toString()))
-        }
 
-        // 3. Create new session
-        val name = generateSessionName()
-        val now = formatNow()
-        val values = ContentValues().apply {
-            put(COL_SESSION_NAME, name)
-            put(COL_SESSION_STATUS, "active")
-            put(COL_CREATED_AT, now)
-            put(COL_ATTENDANT_ID, attendantId)
-        }
-        val id = wdb.insertOrThrow(TABLE_SESSIONS, null, values)
+            // 2. Close any old active sessions (cross-day)
+            val oldSessions = mutableListOf<Session>()
+            val oldCursor = db.rawQuery(
+                "SELECT * FROM $TABLE_SESSIONS WHERE $COL_SESSION_STATUS = 'active' ORDER BY $COL_CREATED_AT DESC",
+                null
+            )
+            oldCursor.use {
+                while (it.moveToNext()) oldSessions.add(sessionFromCursor(it))
+            }
 
-        return Pair(getSessionById(id)!!, closedOldSessionName)
+            val closedOldSessionName = oldSessions.firstOrNull()?.name
+
+            for (sess in oldSessions) {
+                val values = ContentValues().apply {
+                    put(COL_SESSION_STATUS, "closed")
+                    put(COL_ENDED_AT, formatNow())
+                    put(COL_IS_SYNCED, 0)
+                }
+                db.update(TABLE_SESSIONS, values, "$COL_ID = ?", arrayOf(sess.id.toString()))
+            }
+
+            // 3. Create new session
+            val name = generateSessionName()
+            val now = formatNow()
+            val values = ContentValues().apply {
+                put(COL_SESSION_NAME, name)
+                put(COL_SESSION_STATUS, "active")
+                put(COL_CREATED_AT, now)
+                put(COL_ATTENDANT_ID, attendantId)
+            }
+            val id = db.insertOrThrow(TABLE_SESSIONS, null, values)
+            val session = getSessionById(id)!!
+
+            db.setTransactionSuccessful()
+            return Pair(session, closedOldSessionName)
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun getSessionById(id: Long): Session? {

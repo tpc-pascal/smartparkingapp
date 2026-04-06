@@ -15,6 +15,8 @@ jest.mock('../src/utils/nfcHelper', () => ({
 jest.mock('../src/utils/databaseHelper', () => ({
   recordEntryFull: jest.fn(),
   recordExitFull: jest.fn(),
+  notifySuccess: jest.fn(),
+  searchParkingLogs: jest.fn(),
 }));
 
 jest.mock('../src/context/AuthContext', () => ({
@@ -73,7 +75,7 @@ it('shows success state after successful NFC write', async () => {
 
 it('records entry after NFC write and confirming', async () => {
   nfc.writeNdef.mockResolvedValue(undefined);
-  db.recordEntryFull.mockResolvedValue(undefined);
+  db.recordEntryFull.mockResolvedValue({ id: 1 });
   const { getByText, findByText } = render(<NFCScreen />);
   await act(async () => {
     fireEvent.press(getByText('Chạm để ghi thẻ'));

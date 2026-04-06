@@ -7,7 +7,11 @@ import androidx.work.WorkerParameters
 class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        LogBuffer.add("[SYNC] SyncWorker started")
+        if (runAttemptCount > 3) {
+            LogBuffer.add("[SYNC] Max retries exceeded ($runAttemptCount), giving up")
+            return Result.failure()
+        }
+        LogBuffer.add("[SYNC] SyncWorker started (attempt $runAttemptCount)")
         val db = DatabaseHelper(applicationContext)
         val prefs = applicationContext.getSharedPreferences("session", Context.MODE_PRIVATE)
         val syncPrefs = applicationContext.getSharedPreferences("sync", Context.MODE_PRIVATE)
@@ -71,13 +75,21 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
         val logs = db.getUnsyncedParkingLogs()
         LogBuffer.add("[SYNC] Pushing ${logs.size} unsynced parking logs")
         for (log in logs) {
-            var serverId = api.pushParkingLog(log)
+            val sess = db.getSessionById(log.sessionId)
+            val serverSessId = sess?.serverId
+            if (serverSessId == null) {
+                LogBuffer.add("[SYNC] Skipping parking log ${log.id} because its session ${log.sessionId} has no serverId (not synced yet)")
+                hasFailure = true
+                continue
+            }
+            val logToPush = log.copy(sessionId = serverSessId)
+            var serverId = api.pushParkingLog(logToPush)
             if (serverId == null && !jwtRefreshed) {
                 val newJwt = refreshJwt(applicationContext, db, prefs)
                 if (newJwt != null) {
                     jwtRefreshed = true
                     api = SupabaseApi(newJwt)
-                    serverId = api.pushParkingLog(log)
+                    serverId = api.pushParkingLog(logToPush)
                 }
             }
             if (serverId != null) {

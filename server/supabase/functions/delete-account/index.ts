@@ -11,12 +11,18 @@ Deno.serve(async (req) => {
 
   // 1. Delete auth user
   const { error: authErr } = await supabase.auth.admin.deleteUser(uid)
-  if (authErr) console.error('deleteAuthUser error:', authErr)
+  if (authErr) {
+    console.error('deleteAuthUser error:', authErr)
+    return new Response(JSON.stringify({ ok: false, error: `Failed to delete auth user: ${authErr.message}` }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
 
   // 2. Delete storage images with prefix
   const { data: files } = await supabase.storage.from('parking-images').list('', { prefix: uid })
   if (files && files.length > 0) {
-    const paths = files.map(f => `${uid}_${f.name}`)
+    const paths = files.map(f => f.name)
     await supabase.storage.from('parking-images').remove(paths)
   }
 
