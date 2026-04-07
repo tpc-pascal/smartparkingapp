@@ -1,3 +1,22 @@
+jest.mock('react-native', () => {
+  const RN = jest.requireActual('react-native');
+  RN.NativeModules.DatabaseModule = {
+    ...RN.NativeModules.DatabaseModule,
+    saveFile: jest.fn(() => Promise.resolve()),
+  };
+  return RN;
+}, { virtual: true });
+
+jest.mock('react-native-fs', () => ({
+  CachesDirectoryPath: '/mock/cache',
+  writeFile: jest.fn(() => Promise.resolve()),
+}));
+
+jest.mock('@react-native-community/netinfo', () => ({
+  addEventListener: jest.fn(() => jest.fn()),
+  fetch: jest.fn(() => Promise.resolve({ isConnected: true, isInternetReachable: true })),
+}));
+
 jest.mock('react-native-vector-icons/Feather', () => 'Feather');
 
 jest.mock('react-native-vision-camera', () => ({

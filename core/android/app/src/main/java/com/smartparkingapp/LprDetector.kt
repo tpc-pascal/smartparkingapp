@@ -222,27 +222,11 @@ object LprDetector {
 
         updateThermalState()
 
-        if (stableTrackingFrames > 0) {
-            stableTrackingFrames--
-            return PipelineResult(
-                plate = cachedPlateText, confidence = lastPlateConfidence,
-                bbox = cachedPlateBbox, charBboxes = cachedCharBboxes,
-                imageWidth = origW, imageHeight = origH,
-                timingPreMs = 0, timingLpdMs = 0, timingLprMs = 0, timingTotalMs = 0
-            )
-        }
+        val skipStableLpr = stableTrackingFrames > 0
+        if (skipStableLpr) stableTrackingFrames--
 
         frameCount++
-        if (frameCount % lpdThermalInterval != 0) {
-            if (cachedPlateText.isNotEmpty()) {
-                return PipelineResult(
-                    plate = cachedPlateText, confidence = lastPlateConfidence,
-                    bbox = cachedPlateBbox, charBboxes = cachedCharBboxes,
-                    imageWidth = origW, imageHeight = origH,
-                    timingPreMs = 0, timingLpdMs = 0, timingLprMs = 0, timingTotalMs = 0
-                )
-            }
-        }
+        val skipThermalLpr = frameCount % lpdThermalInterval != 0 && cachedPlateText.isNotEmpty()
 
         val lpdBuf = lpdFloatBuffer ?: FloatArray(BUFFER_SIZE)
         val lpdResult = ImageProcessor.fillLetterboxFloat(bitmap, lpdBuf, 640)
@@ -261,6 +245,11 @@ object LprDetector {
 
         if (plates.isEmpty()) {
             consecutivePlateFrames = 0
+            cachedPlateText = ""
+            cachedPlateBbox = null
+            cachedCharBboxes = emptyList()
+            lastPlateConfidence = 0f
+            stableTrackingFrames = 0
             Log.d(TAG, "TIMING pre=${t1 - t0}ms LPD=${tLpd}ms post=0ms TOTAL=${System.currentTimeMillis() - t0}ms no_plate")
             return PipelineResult(
                 imageWidth = origW, imageHeight = origH,
@@ -284,6 +273,11 @@ object LprDetector {
 
         if (cw < 10 || ch < 10) {
             consecutivePlateFrames = 0
+            cachedPlateText = ""
+            cachedPlateBbox = null
+            cachedCharBboxes = emptyList()
+            lastPlateConfidence = 0f
+            stableTrackingFrames = 0
             Log.d(TAG, "TIMING pre=${t1 - t0}ms LPD=${tLpd}ms post=0ms TOTAL=${System.currentTimeMillis() - t0}ms small_plate")
             return PipelineResult(
                 bbox = plateBbox, imageWidth = origW, imageHeight = origH,
@@ -297,14 +291,18 @@ object LprDetector {
             lastPlateConfidence > 0.7f -> 2
             else -> 1
         }
-        val skipLpr = frameCount % adaptiveInterval != 0
+        val skipLpr = skipStableLpr || skipThermalLpr || (frameCount % adaptiveInterval != 0)
         val hasCache = cachedPlateBbox != null && cachedCharBboxes.isNotEmpty()
+        val bboxMoved = hasCache && (
+            abs(bx1 - cachedPlateBbox!!.x1) > MOTION_TOLERANCE * 2 ||
+            abs(by1 - cachedPlateBbox!!.y1) > MOTION_TOLERANCE * 2
+        )
 
         val tLpr: Long
         val best: LprFullResult
         val projChars: List<Detection>
 
-        if (skipLpr && hasCache) {
+        if (skipLpr && hasCache && !bboxMoved) {
             tLpr = 0
             val dx = bx1 - cachedPlateBbox!!.x1
             val dy = by1 - cachedPlateBbox!!.y1
@@ -351,11 +349,18 @@ object LprDetector {
                 cachedCharBboxes = projChars
                 cachedPlateText = lprResult.plate
                 lastPlateConfidence = lprResult.confidence
+            } else {
+                cachedPlateText = ""
+                cachedPlateBbox = null
+                cachedCharBboxes = emptyList()
+                lastPlateConfidence = 0f
+                consecutivePlateFrames = 0
+                stableTrackingFrames = 0
             }
         }
 
         val tTotal = System.currentTimeMillis() - t0
-        val inferLabel = if (skipLpr && hasCache) "LPR_SKIP" else "LPR_FULL"
+        val inferLabel = if (skipLpr && hasCache && !bboxMoved) "LPR_SKIP" else "LPR_FULL"
         Log.d(TAG, "TIMING pre=${t1 - t0}ms LPD=${tLpd}ms ${inferLabel}=${tLpr}ms TOTAL=${tTotal}ms plate=${best.plate}")
         return PipelineResult(
             plate = best.plate, confidence = best.confidence,

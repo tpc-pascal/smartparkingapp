@@ -5,7 +5,6 @@ import PermissionScreen from '../src/screens/PermissionScreen';
 jest.mock('../src/utils/databaseHelper', () => ({
   setSettingBool: jest.fn(),
   getSession: jest.fn(),
-  isOnline: jest.fn(),
 }));
 
 jest.mock('../src/context/AuthContext', () => ({
@@ -30,11 +29,11 @@ beforeEach(() => {
 it('renders title and subtitle', () => {
   const { getByText } = render(<PermissionScreen />);
   expect(getByText('Yêu cầu thiết lập')).toBeTruthy();
-  expect(getByText('Vui lòng hoàn tất các bước sau để tiếp tục')).toBeTruthy();
+  expect(getByText('Vui lòng cấp quyền camera để tiếp tục')).toBeTruthy();
 });
 
-it('renders camera and network cards', () => {
-  const { getByText } = render(<PermissionScreen />);
+it('renders camera card only', () => {
+  const { getByText, queryByText } = render(<PermissionScreen />);
   expect(getByText('Camera')).toBeTruthy();
-  expect(getByText('Mạng')).toBeTruthy();
+  expect(queryByText('Mạng')).toBeNull();
 });

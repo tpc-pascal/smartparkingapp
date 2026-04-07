@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { Alert } from 'react-native';
 import { getActiveSession, createSession as dbCreateSession, endSession as dbEndSession, SessionInfo } from '../utils/databaseHelper';
 
@@ -43,8 +43,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return result;
   }, [session]);
 
+  const value = useMemo(() => ({ session, loading, refresh, createNewSession, endCurrentSession }), [session, loading, refresh, createNewSession, endCurrentSession]);
+
   return (
-    <SessionContext.Provider value={{ session, loading, refresh, createNewSession, endCurrentSession }}>
+    <SessionContext.Provider value={value}>
       {children}
     </SessionContext.Provider>
   );

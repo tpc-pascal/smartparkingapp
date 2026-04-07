@@ -39,7 +39,11 @@ class NfcModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(c
 
     @ReactMethod
     fun isNfcSupported(promise: Promise) {
-        promise.resolve(NfcAdapter.getDefaultAdapter(reactApplicationContext) != null)
+        try {
+            promise.resolve(NfcAdapter.getDefaultAdapter(reactApplicationContext) != null)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
     }
 
     @ReactMethod
@@ -176,7 +180,9 @@ class NfcModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(c
             if (msg.records.isEmpty()) throw Exception("Thẻ không có dữ liệu")
             val record = msg.records[0]
             val payload = record.payload
+            if (payload.isEmpty()) throw Exception("Thẻ không có dữ liệu")
             val langLen = payload[0].toInt() and 0x3F
+            if (1 + langLen > payload.size) throw Exception("Dữ liệu thẻ không hợp lệ")
             val isUTF16 = payload[0].toInt() and 0x80 != 0
             val textBytes = payload.copyOfRange(1 + langLen, payload.size)
             return String(textBytes, if (isUTF16) Charsets.UTF_16 else Charsets.UTF_8)

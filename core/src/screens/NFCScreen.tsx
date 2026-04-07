@@ -17,10 +17,18 @@ import { writeNdef, readNdef, cancelWrite } from '../utils/nfcHelper';
 import { recordEntryFull, recordExitFull, searchParkingLogs, ParkingLogResult, notifySuccess } from '../utils/databaseHelper';
 import Icon from '../theme/Icon';
 
+function vnTimestamp(): string {
+  const d = new Date();
+  const vnTime = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const ms = vnTime.getUTCMilliseconds().toString().padStart(3, '0');
+  return `${vnTime.getUTCFullYear()}-${pad(vnTime.getUTCMonth() + 1)}-${pad(vnTime.getUTCDate())}T${pad(vnTime.getUTCHours())}:${pad(vnTime.getUTCMinutes())}:${pad(vnTime.getUTCSeconds())}.${ms}+07:00`;
+}
+
 function NFCScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'NfcEntry'>>();
-  const { mode, plateText, imageUri } = route.params;
+  const { mode, plateText, imageUri } = route.params ?? {};
   const { attendantId, attendantName } = useAuth();
   const { session } = useSession();
   const entryImage = mode === 'write' ? imageUri : undefined;
@@ -47,7 +55,7 @@ function NFCScreen() {
     }
     setStatus('waiting');
     try {
-      const ts = new Date().toISOString();
+      const ts = vnTimestamp();
       await writeNdef(`${attendantId}|${ts}|${plateText}|${session.id}`);
       setStatus('success');
       notifySuccess().catch(() => {});
@@ -65,7 +73,7 @@ function NFCScreen() {
     }
     setStatus('waiting');
     try {
-      const decrypted = await readNdef();
+      const decrypted = (await readNdef()) ?? '';
       const parts = decrypted.split('|');
       if (parts.length < 4) {
         setErrorMsg('Dữ liệu thẻ không hợp lệ');
@@ -110,7 +118,7 @@ function NFCScreen() {
       return;
     }
     setStatus('processing');
-    const ts = new Date().toISOString();
+    const ts = vnTimestamp();
     try {
       await recordEntryFull(plateText, ts, entryImage, session.id);
       Alert.alert('Thành công', `Đã ghi nhận xe vào: ${plateText}`);
@@ -129,23 +137,24 @@ function NFCScreen() {
       Alert.alert('Lỗi', 'Dữ liệu thẻ không hợp lệ');
       return;
     }
+    if (nfcPlate !== plateText) {
+      Alert.alert('Lỗi', 'Biển số trên thẻ NFC không khớp với xe đang quét');
+      return;
+    }
     setStatus('processing');
     try {
       await recordExitFull(nfcPlate, exitImage);
-      try {
-        await writeNdef('ERASED|0||0');
-      } catch {
-        /* không block nếu xoá thẻ thất bại */
-      }
+      writeNdef('ERASED|0||0').catch(() => {});
       Alert.alert('Thành công', `Đã ghi nhận xe ra: ${nfcPlate}`);
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     } catch (err: unknown) {
       Alert.alert('Lỗi', err instanceof Error ? err.message : 'Không thể ghi nhận xe ra');
       navigation.reset({ index: 0, routes: [{ name: 'Home' }] });
     }
-  }, [nfcData, exitImage, navigation]);
+  }, [nfcData, exitImage, navigation, plateText]);
 
-  const nfcPlate = nfcData.split('|').length >= 3 ? nfcData.split('|')[2] : '';
+  const parts = nfcData.split('|');
+  const nfcPlate = parts.length >= 3 ? parts[2] : '';
   const nfcTagContent = mode === 'write' && status === 'success'
     ? `${attendantId}|...|${plateText}|${session?.id || '?'}`
     : (mode === 'read' && status === 'success' ? nfcData : null);
@@ -241,7 +250,7 @@ function NFCScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0D0D0D' },
-  backButton: { position: 'absolute', top: 16, left: 16, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', zIndex: 10 },
+  backButton: { position: 'absolute', top: 16, left: 16, justifyContent: 'center', alignItems: 'center', zIndex: 10 },
   backText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
   content: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24, gap: 24 },
   title: { fontSize: 22, fontWeight: '700', color: '#FFFFFF', marginBottom: 8 },

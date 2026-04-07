@@ -370,6 +370,33 @@ class SupabaseApi(
         }
     }
 
+    fun updateParkingLogByServerId(serverId: Long, log: ParkingLog): Boolean {
+        val body = buildJsonObject {
+            addProperty("license_plate", log.licensePlate)
+            addProperty("time_in", log.timeIn)
+            if (log.timeOut != null) addProperty("time_out", log.timeOut)
+            if (log.entryImage != null) addProperty("entry_image", log.entryImage)
+            if (log.exitImage != null) addProperty("exit_image", log.exitImage)
+            addProperty("fee", log.fee)
+            addProperty("session_id", log.sessionId)
+        }
+        val url = "$restUrl/${SupabaseConfig.TABLE_PARKING_LOGS}?id=eq.$serverId"
+        val json = gson.toJson(body)
+        return try {
+            val request = Request.Builder()
+                .url(url)
+                .patch(json.toRequestBody(jsonType))
+                .apply { authHeaders().forEach { (k, v) -> addHeader(k, v) } }
+                .build()
+            val resp = client.newCall(request).execute()
+            LogBuffer.add("[SUPABASE] PATCH parking_log_by_serverid: ${resp.code}")
+            resp.isSuccessful
+        } catch (e: Exception) {
+            LogBuffer.add("[SUPABASE] PATCH parking_log_by_serverid FAILED: ${e.message}")
+            false
+        }
+    }
+
     fun uploadImage(localPath: String, remotePath: String): String? {
         val cleanPath = localPath.removePrefix("file://")
         val file = File(cleanPath)

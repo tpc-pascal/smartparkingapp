@@ -1,6 +1,12 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+
+// Chỉ bundle Feather.ttf (~56KB) thay vì 19 fonts (~3.8MB)
+// Phải đặt TRƯỚC fonts.gradle để script đọc được config
+project.ext.vectoricons = [
+    iconFontNames: [ "Feather.ttf" ]
+]
 apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
 
 /**
@@ -28,11 +34,10 @@ react {
     // bundleCommand = "ram-bundle"  // incompatible with Hermes
 
     /* Hermes Commands */
-    //   The hermes compiler command to run. By default it is 'hermesc'
-    // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
-    //
-    //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
-    // hermesFlags = ["-O", "-output-source-map"]
+    //   The list of flags to pass to the Hermes compiler.
+    //   "-O": optimize, "-output-source-map": generate source map (needed for debugging)
+    //   Bỏ "-output-source-map" ở release để không bundle source map vô APK
+    hermesFlags = ["-O"]
 
     /* Autolinking */
     autolinkLibrariesWithApp()
@@ -69,6 +74,15 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        ndk { abiFilters "arm64-v8a" }
+        // Nén assets (ONNX models) trong APK — mặc định của RN là noCompress .onnx
+        // Nếu aaptOptions.noCompress có .onnx, models sẽ không nén → tăng size
+    }
+    // Chỉ giữ arm64-v8a native libs, xoá các arch khác nếu lọt vào
+    packagingOptions {
+        exclude 'lib/armeabi-v7a/**'
+        exclude 'lib/x86/**'
+        exclude 'lib/x86_64/**'
     }
     // Load keystore properties for release signing
     def keystorePropsFile = rootProject.file('keystore.properties')
@@ -98,7 +112,8 @@ android {
         release {
             signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
 

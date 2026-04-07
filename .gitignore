@@ -33,3 +33,7 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Credentials (secrets, not for public repo)
+server/.env
+core/android/keystore.properties

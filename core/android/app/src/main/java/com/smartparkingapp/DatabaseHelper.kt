@@ -85,17 +85,28 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
 
         private val dateFmt = ThreadLocal<SimpleDateFormat>()
 
+        private val vnTz = TimeZone.getTimeZone("Asia/Ho_Chi_Minh")
+
         private fun getDateFormat(): SimpleDateFormat {
             var fmt = dateFmt.get()
             if (fmt == null) {
-                fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+                fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
+                fmt.timeZone = vnTz
                 dateFmt.set(fmt)
             }
             return fmt
         }
         fun formatNow() = getDateFormat().format(Date())
-        fun todayStart() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + "T00:00:00Z"
-        fun todayEnd() = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + "T23:59:59Z"
+        fun todayStart(): String {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            sdf.timeZone = vnTz
+            return sdf.format(Date()) + "T00:00:00+07:00"
+        }
+        fun todayEnd(): String {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            sdf.timeZone = vnTz
+            return sdf.format(Date()) + "T23:59:59+07:00"
+        }
         fun sha256(input: String): String {
             val digest = java.security.MessageDigest.getInstance("SHA-256")
             return digest.digest(input.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
@@ -438,17 +449,25 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
         return queryLogs("$COL_TIME_OUT IS NULL", null, "$COL_TIME_IN DESC", limit)
     }
 
-    fun getTodayStats(): TodayStats {
+    fun getParkingLogsBySession(sessionId: Long, limit: Int = 200): List<ParkingLog> {
+        return queryLogs("$COL_SESSION_ID = ?", arrayOf(sessionId.toString()), "$COL_TIME_IN DESC", limit)
+    }
+
+    fun getTodayStats(sessionId: Long? = null): TodayStats {
         val db = readableDatabase
         val ts = todayStart()
         val te = todayEnd()
+        val sessionFilter = if (sessionId != null) " AND $COL_SESSION_ID = ?" else ""
+        val args = mutableListOf(ts, te, ts, te)
+        if (sessionId != null) args.add(sessionId.toString())
         val cursor = db.rawQuery("""
             SELECT
                 SUM(CASE WHEN $COL_TIME_IN >= ? AND $COL_TIME_IN <= ? THEN 1 ELSE 0 END),
                 SUM(CASE WHEN $COL_TIME_OUT >= ? AND $COL_TIME_OUT <= ? THEN 1 ELSE 0 END),
                 SUM(CASE WHEN $COL_TIME_OUT IS NULL THEN 1 ELSE 0 END)
             FROM $TABLE_PARKING_LOGS
-        """.trimIndent(), arrayOf(ts, te, ts, te))
+            WHERE 1=1$sessionFilter
+        """.trimIndent(), args.toTypedArray())
         return cursor.use {
             if (it.moveToFirst()) TodayStats(it.getInt(0), it.getInt(1), it.getInt(2))
             else TodayStats()
@@ -458,6 +477,8 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
     fun searchParkingLogs(
         query: String? = null,
         onlyParked: Boolean = false,
+        onlyExited: Boolean = false,
+        sessionId: Long? = null,
         offset: Int = 0,
         limit: Int = 30,
     ): List<ParkingLog> {
@@ -469,6 +490,13 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
         }
         if (onlyParked) {
             conditions.add("$COL_TIME_OUT IS NULL")
+        }
+        if (onlyExited) {
+            conditions.add("$COL_TIME_OUT IS NOT NULL")
+        }
+        if (sessionId != null) {
+            conditions.add("$COL_SESSION_ID = ?")
+            args.add(sessionId.toString())
         }
         val where = if (conditions.isEmpty()) null else conditions.joinToString(" AND ")
         return queryLogs(where, args.toTypedArray(), "$COL_TIME_IN DESC", limit, offset)
@@ -716,7 +744,7 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
                 put(COL_ATTENDANT_ID, attendantId)
             }
             val id = db.insertOrThrow(TABLE_SESSIONS, null, values)
-            val session = getSessionById(id)!!
+            val session = getSessionById(id) ?: throw IllegalStateException("Session không tìm thấy sau khi tạo")
 
             db.setTransactionSuccessful()
             return Pair(session, closedOldSessionName)
@@ -768,6 +796,10 @@ class DatabaseHelper(context: Context) : SQLiteOpenHelper(
 
     fun getUnsyncedSessions(): List<Session> {
         return querySessions("$COL_IS_SYNCED = 0", null)
+    }
+
+    fun getAllSessionsForAttendant(attendantId: Long): List<Session> {
+        return querySessions("$COL_ATTENDANT_ID = ?", arrayOf(attendantId.toString()))
     }
 
     fun getAllSessions(): List<Session> {

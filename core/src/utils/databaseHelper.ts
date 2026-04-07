@@ -123,10 +123,10 @@ const db = {
     (DatabaseModule?.recordExitFull(licensePlate, exitImage) as Promise<number>),
   getCurrentlyParked: () =>
     (DatabaseModule?.getCurrentlyParked() as Promise<NativeLogRow[]>),
-  getTodayStats: () =>
-    (DatabaseModule?.getTodayStats() as Promise<NativeStatsResult>),
-  searchParkingLogs: (query: string | null, parked: string | null, offset: number, limit: number) =>
-    (DatabaseModule?.searchParkingLogs(query, parked, offset, limit) as Promise<NativeLogRow[]>),
+  getTodayStats: (sessionId: number | null) =>
+    (DatabaseModule?.getTodayStats(sessionId) as Promise<NativeStatsResult>),
+  searchParkingLogs: (query: string | null, parked: string | null, exited: string | null, sessionId: number | null, offset: number, limit: number) =>
+    (DatabaseModule?.searchParkingLogs(query, parked, exited, sessionId, offset, limit) as Promise<NativeLogRow[]>),
   triggerSync: () =>
     (DatabaseModule?.triggerSync() as Promise<true>),
   dumpDatabase: () =>
@@ -149,6 +149,10 @@ const db = {
     (DatabaseModule?.getDebugLogs(count) as Promise<string[]>),
   isOnline: () =>
     (DatabaseModule?.isOnline() as Promise<boolean>),
+  getAllSessions: () =>
+    (DatabaseModule?.getAllSessions() as Promise<NativeSessionResult[]>),
+  getParkingLogsBySession: (sessionId: number) =>
+    (DatabaseModule?.getParkingLogsBySession(sessionId) as Promise<NativeLogRow[]>),
 };
 
 // ── Public API ──
@@ -166,6 +170,15 @@ export async function getDebugLogs(count?: number): Promise<string[]> {
 export async function isOnline(): Promise<boolean> {
   if (!DatabaseModule) return false;
   return db.isOnline();
+}
+
+export async function getAllSessions(): Promise<SessionInfo[]> {
+  if (!DatabaseModule) throw new Error('DatabaseModule not available');
+  const result = await db.getAllSessions();
+  return result.map(s => ({
+    id: s.id, name: s.name, status: s.status,
+    createdAt: s.createdAt, endedAt: s.endedAt,
+  }));
 }
 
 export async function getAttendantById(id: number): Promise<AttendantDetail> {
@@ -237,14 +250,14 @@ export async function executeSql(sql: string): Promise<SqlResult[]> {
   try {
     const rows: SqlResult[] = await DatabaseModule.executeSql(sql);
     return rows ?? [];
-  } catch { return []; }
+  } catch (e) { console.error('[executeSql]', e); return []; }
 }
 
 export async function fetchSupabaseTable(tableName: string): Promise<SqlResult[]> {
   try {
     const rows: SqlResult[] = await DatabaseModule.fetchSupabaseTable(tableName);
     return rows ?? [];
-  } catch { return []; }
+  } catch (e) { console.error('[fetchSupabaseTable]', e); return []; }
 }
 
 export async function verifySessionOnSupabase(): Promise<boolean> {
@@ -312,20 +325,38 @@ export async function getCurrentlyParked(): Promise<ParkingLogResult[]> {
   }));
 }
 
-export async function getTodayStats(): Promise<TodayStats> {
+export async function getTodayStats(sessionId?: number): Promise<TodayStats> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  return db.getTodayStats();
+  return db.getTodayStats(sessionId ?? null);
 }
 
 export async function searchParkingLogs(
   query?: string,
   onlyParked?: boolean,
+  onlyExited?: boolean,
+  sessionId?: number,
   offset?: number,
   limit?: number,
 ): Promise<ParkingLogResult[]> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
   const parkedStr = onlyParked ? 'true' : null;
-  const array = await db.searchParkingLogs(query || null, parkedStr, offset || 0, limit || 50);
+  const exitedStr = onlyExited ? 'true' : null;
+  const array = await db.searchParkingLogs(query || null, parkedStr, exitedStr, sessionId ?? null, offset || 0, limit || 50);
+  return array.map(item => ({
+    id: item.id,
+    licensePlate: item.licensePlate,
+    timeIn: item.timeIn,
+    timeOut: item.timeOut,
+    entryImage: item.entryImage,
+    exitImage: item.exitImage,
+    fee: item.fee,
+    sessionId: item.sessionId,
+  }));
+}
+
+export async function getParkingLogsBySession(sessionId: number): Promise<ParkingLogResult[]> {
+  if (!DatabaseModule) throw new Error('DatabaseModule not available');
+  const array = await db.getParkingLogsBySession(sessionId);
   return array.map(item => ({
     id: item.id,
     licensePlate: item.licensePlate,
@@ -344,6 +375,13 @@ export async function triggerSync(): Promise<void> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
   await db.triggerSync();
 }
+
+export async function triggerFullSync(): Promise<void> {
+  if (!DatabaseModule) throw new Error('DatabaseModule not available');
+  await DatabaseModule.triggerFullSync();
+}
+
+
 
 export async function dumpDatabase(): Promise<string> {
   if (!DatabaseModule) return 'DatabaseModule not available';

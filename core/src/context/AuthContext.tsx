@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import { logout as dbLogout, deleteAccount as dbDeleteAccount } from '../utils/databaseHelper';
 
 interface AuthContextType {
@@ -32,8 +32,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAttendantName('');
   }, []);
 
+  const value = useMemo(() => ({ attendantId, attendantName, login, logout, deleteAccount }), [attendantId, attendantName, login, logout, deleteAccount]);
+
   return (
-    <AuthContext.Provider value={{ attendantId, attendantName, login, logout, deleteAccount }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
