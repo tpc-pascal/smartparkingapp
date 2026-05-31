@@ -1,99 +1,96 @@
 import React, { useRef, useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, TextInput, StyleSheet, StatusBar, UIManager, findNodeHandle } from 'react-native';
-import LicensePlateCamera from '../components/LicensePlateCamera';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  StyleSheet,
+  StatusBar,
+  Alert,
+} from 'react-native';
+import CameraView from '../components/CameraView';
+import SnapshotOverlay from '../components/SnapshotOverlay';
+import { recognizePlate, BBox } from '../utils/plateHelper';
 
-interface ScanScreenProps {
+interface EntryScreenProps {
   type: 'Entry' | 'Exit';
   onBack: () => void;
 }
 
-function ScanScreen({ type, onBack }: ScanScreenProps) {
+function EntryScreen({ type, onBack }: EntryScreenProps) {
   const cameraRef = useRef<any>(null);
   const [plateText, setPlateText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [hasSnapshot, setHasSnapshot] = useState(false);
-  const [zoom, setZoom] = useState(1);
+  const [capturedImageUri, setCapturedImageUri] = useState<string | undefined>();
+  const [plateBbox, setPlateBbox] = useState<BBox | null>(null);
 
-  const handleTakeSnapshot = useCallback(() => {
+  const handleTakeSnapshot = useCallback(async () => {
     if (hasSnapshot || isProcessing) return;
     setIsProcessing(true);
 
-    const viewId = findNodeHandle(cameraRef.current);
-    if (viewId) {
-      UIManager.dispatchViewManagerCommand(
-        viewId,
-        'takeSnapshot',
-        [],
-      );
+    try {
+      if (!cameraRef.current?.takeSnapshot) {
+        setIsProcessing(false);
+        return;
+      }
+
+      const snapshotUri = await cameraRef.current.takeSnapshot();
+      if (!snapshotUri) {
+        setIsProcessing(false);
+        Alert.alert('Lỗi', 'Không thể chụp ảnh');
+        return;
+      }
+
+      const uri = `file://${snapshotUri}`;
+      setCapturedImageUri(uri);
+      setHasSnapshot(true);
+
+      const plateResult = await recognizePlate(snapshotUri);
+      if (plateResult.plate && plateResult.plate !== 'unknown') {
+        setPlateText(plateResult.plate);
+      }
+      setPlateBbox(plateResult.bbox);
+    } catch {
+      Alert.alert('Lỗi', 'Không thể nhận diện biển số');
+    } finally {
+      setIsProcessing(false);
     }
   }, [hasSnapshot, isProcessing]);
 
   const handleRetake = useCallback(() => {
     setHasSnapshot(false);
+    setCapturedImageUri(undefined);
     setPlateText('');
+    setPlateBbox(null);
     setIsProcessing(false);
-
-    const viewId = findNodeHandle(cameraRef.current);
-    if (viewId) {
-      UIManager.dispatchViewManagerCommand(
-        viewId,
-        'resetSnapshot',
-        [],
-      );
-    }
-  }, []);
-
-  const handlePlateRecognized = useCallback((event: any) => {
-    const { plate, success, error } = event.nativeEvent;
-    console.log(`[LPR_JS] handlePlateRecognized: plate='${plate}', success=${success}, error=${error}`);
-    setIsProcessing(false);
-    setHasSnapshot(true);
-    if (success && plate) {
-      setPlateText(plate);
-    } else {
-      console.log(`[LPR_JS] No plate recognized${error ? ': ' + error : ''}`);
-    }
   }, []);
 
   const handleConfirm = useCallback(() => {
-    if (plateText.trim()) {
-      const action = type === 'Entry' ? 'xe vào' : 'xe ra';
-      console.log(`Đã ghi nhận ${action}: ${plateText}`);
-      handleRetake();
+    if (!plateText.trim()) {
+      Alert.alert('Thông báo', 'Vui lòng nhập hoặc quét biển số xe');
+      return;
     }
-  }, [plateText, type, handleRetake]);
-
-  const handleZoomIn = useCallback(() => {
-    setZoom(prev => Math.min(prev + 0.5, 5));
-  }, []);
-
-  const handleZoomOut = useCallback(() => {
-    setZoom(prev => Math.max(prev - 0.5, 1));
-  }, []);
-
-  const title = type === 'Entry' ? 'Quét xe vào' : 'Quét xe ra';
+    handleRetake();
+  }, [plateText, handleRetake]);
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
       <View style={styles.cameraContainer}>
-        <LicensePlateCamera
+        <CameraView
           ref={cameraRef}
           style={styles.camera}
-          zoom={zoom}
-          onPlateRecognized={handlePlateRecognized}
+          active={!hasSnapshot}
         />
 
-        <View style={styles.zoomControls}>
-          <TouchableOpacity style={styles.zoomButton} onPress={handleZoomIn}>
-            <Text style={styles.zoomText}>+</Text>
-          </TouchableOpacity>
-          <Text style={styles.zoomLabel}>{zoom.toFixed(1)}x</Text>
-          <TouchableOpacity style={styles.zoomButton} onPress={handleZoomOut}>
-            <Text style={styles.zoomText}>-</Text>
-          </TouchableOpacity>
-        </View>
+        <SnapshotOverlay
+          imageUri={capturedImageUri}
+          isVisible={hasSnapshot}
+          isProcessing={isProcessing}
+          bbox={plateBbox}
+        />
 
         <TouchableOpacity style={styles.backButton} onPress={onBack}>
           <Text style={styles.backText}>← Quay lại</Text>
@@ -101,7 +98,7 @@ function ScanScreen({ type, onBack }: ScanScreenProps) {
       </View>
 
       <View style={styles.bottomPanel}>
-        <Text style={styles.panelTitle}>{title}</Text>
+        <Text style={styles.panelTitle}>{type === 'Entry' ? 'Quét xe vào' : 'Quét xe ra'}</Text>
 
         <View style={styles.plateRow}>
           <TextInput
@@ -114,25 +111,33 @@ function ScanScreen({ type, onBack }: ScanScreenProps) {
           />
         </View>
 
-        <TouchableOpacity
-          style={[
-            styles.actionButton,
-            isProcessing && styles.buttonDisabled,
-            hasSnapshot && styles.retakeButton,
-          ]}
-          onPress={hasSnapshot ? handleRetake : handleTakeSnapshot}
-          disabled={isProcessing}>
-          <Text style={styles.actionButtonText}>
-            {isProcessing ? 'Đang xử lý...' : hasSnapshot ? 'Thử lại' : 'Chụp ảnh'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.confirmButton, !plateText.trim() && styles.buttonDisabled]}
-          onPress={handleConfirm}
-          disabled={!plateText.trim()}>
-          <Text style={styles.confirmText}>Xác nhận</Text>
-        </TouchableOpacity>
+        {hasSnapshot ? (
+          <>
+            <TouchableOpacity
+              style={styles.retakeButton}
+              onPress={handleRetake}
+              activeOpacity={0.7}>
+              <Text style={styles.retakeButtonText}>← Thử lại</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.confirmButton, !plateText.trim() && styles.buttonDisabled]}
+              onPress={handleConfirm}
+              disabled={!plateText.trim()}
+              activeOpacity={0.7}>
+              <Text style={styles.confirmText}>Xác nhận</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <TouchableOpacity
+            style={[styles.actionButton, isProcessing && styles.buttonDisabled]}
+            onPress={handleTakeSnapshot}
+            disabled={isProcessing}
+            activeOpacity={0.7}>
+            <Text style={styles.actionButtonText}>
+              {isProcessing ? 'Đang xử lý...' : 'Chụp ảnh'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -146,47 +151,22 @@ const styles = StyleSheet.create({
   cameraContainer: {
     flex: 1,
     position: 'relative',
+    overflow: 'hidden',
   },
   camera: {
     flex: 1,
-  },
-  zoomControls: {
-    position: 'absolute',
-    right: 16,
-    top: '40%',
-    alignItems: 'center',
-    gap: 8,
-  },
-  zoomButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  zoomText: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '600',
-  },
-  zoomLabel: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '600',
   },
   backButton: {
     position: 'absolute',
     top: 16,
     left: 16,
     paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
+    zIndex: 10,
   },
   backText: {
     color: '#FFFFFF',
@@ -194,9 +174,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   bottomPanel: {
-    padding: 24,
+    paddingHorizontal: 20,
+    paddingTop: 20,
     paddingBottom: 40,
-    gap: 16,
+    gap: 14,
+    backgroundColor: '#0D0D0D',
   },
   panelTitle: {
     fontSize: 20,
@@ -212,46 +194,57 @@ const styles = StyleSheet.create({
   plateInput: {
     flex: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 16,
-    padding: 16,
-    fontSize: 24,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 18,
     fontWeight: '700',
     color: '#FFFFFF',
     textAlign: 'center',
-    letterSpacing: 4,
+    letterSpacing: 2,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   actionButton: {
     backgroundColor: '#4A90D9',
-    paddingVertical: 16,
-    borderRadius: 16,
+    paddingVertical: 14,
+    borderRadius: 14,
     alignItems: 'center',
-  },
-  retakeButton: {
-    backgroundColor: 'rgba(255, 193, 7, 0.8)',
+    marginTop: 4,
   },
   buttonDisabled: {
     opacity: 0.5,
   },
   actionButtonText: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
   },
   confirmButton: {
-    backgroundColor: 'rgba(46, 204, 113, 0.2)',
-    paddingVertical: 14,
-    borderRadius: 16,
+    backgroundColor: 'rgba(46, 204, 113, 0.15)',
+    paddingVertical: 12,
+    borderRadius: 14,
     alignItems: 'center',
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: 'rgba(46, 204, 113, 0.4)',
   },
   confirmText: {
     color: '#2ECC71',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
+  },
+  retakeButton: {
+    backgroundColor: 'rgba(255, 193, 7, 0.85)',
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  retakeButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 
-export default ScanScreen;
+export default EntryScreen;
