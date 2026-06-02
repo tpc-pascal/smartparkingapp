@@ -16,9 +16,9 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.io.File
 import java.io.FileOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.text.SimpleDateFormat
+import java.util.*
 
 data class Detection(
     val x1: Float, val y1: Float, val x2: Float, val y2: Float,
@@ -48,8 +48,17 @@ class LicensePlateModule(context: ReactApplicationContext) : ReactContextBaseJav
             val lprPath = assetFilePath(reactApplicationContext, "LP_ocr.onnx")
             lpdSession = ortEnv.createSession(lpdPath)
             lprSession = ortEnv.createSession(lprPath)
-            sendLog("ONNX sessions loaded")
+            sendLog("ONNX sessions loaded (LPD + LPR)")
         }
+    }
+
+    private fun saveDebugBitmap(bitmap: Bitmap, tag: String) {
+        try {
+            val cacheDir = reactApplicationContext.cacheDir
+            val ts = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+            val file = File(cacheDir, "debug_${tag}_${ts}.jpg")
+            FileOutputStream(file).use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out) }
+        } catch (_: Exception) {}
     }
 
     private fun assetFilePath(context: Context, name: String): String {
@@ -79,6 +88,35 @@ class LicensePlateModule(context: ReactApplicationContext) : ReactContextBaseJav
         return detections
     }
 
+    private fun runLPR(bitmap: Bitmap): String {
+        val lprSize = 640
+        val lprResult = ImageProcessor.letterbox(bitmap, lprSize)
+        saveDebugBitmap(lprResult.bitmap, "lpr_input")
+        val lprInput = ImageProcessor.bitmapToFloatArray(lprResult.bitmap)
+        val lprInputTensor = OnnxTensor.createTensor(ortEnv,
+            FloatBuffer.wrap(lprInput),
+            longArrayOf(1, 3, lprSize.toLong(), lprSize.toLong())
+        )
+        val lprOutput = lprSession!!.run(mapOf("images" to lprInputTensor))
+        lprInputTensor.close()
+
+        try {
+            val lprRaw = (lprOutput.get("output").get().value as Array<*>)[0] as Array<FloatArray>
+            sendLog("LPR raw: ${lprRaw.size} x ${if (lprRaw.isNotEmpty()) lprRaw[0].size else 0}")
+            val lprDetections = parseYoloOutput(lprRaw, 0.60f)
+            val chars = ImageProcessor.nms(lprDetections, 0.60f, 0.45f)
+            sendLog("LPR chars: ${chars.size}")
+            if (chars.size in 7..10) {
+                return ImageProcessor.readPlate(chars)
+            }
+        } catch (e: Exception) {
+            sendLog("LPR parse error: ${e.message}")
+        } finally {
+            lprOutput.close()
+        }
+        return "unknown"
+    }
+
     @ReactMethod
     fun recognizePlate(imagePath: String, promise: Promise) {
         sendLog("===> recognizePlate: $imagePath")
@@ -100,6 +138,7 @@ class LicensePlateModule(context: ReactApplicationContext) : ReactContextBaseJav
             val lpdOutput = lpdSession!!.run(mapOf("input" to lpdInputTensor))
             lpdInputTensor.close()
             val lpdRaw = (lpdOutput.get("output").get().value as Array<*>)[0] as Array<FloatArray>
+            lpdOutput.close()
             sendLog("LPD output: ${lpdRaw.size} detections")
 
             val lpdDetections = parseYoloOutput(lpdRaw, 0.25f)
@@ -108,6 +147,7 @@ class LicensePlateModule(context: ReactApplicationContext) : ReactContextBaseJav
 
             val map = Arguments.createMap()
             var bx1 = 0f; var by1 = 0f; var bx2 = 0f; var by2 = 0f
+            var finalPlate = "unknown"
 
             if (plates.isNotEmpty()) {
                 val plate = plates.first()
@@ -126,46 +166,46 @@ class LicensePlateModule(context: ReactApplicationContext) : ReactContextBaseJav
                 bbox.putDouble("y2", by2.toDouble())
                 map.putMap("bbox", bbox)
 
+                // Step 2: Crop + Deskew loop (same as Python app.py)
                 val cw = (bx2 - bx1).toInt().coerceAtLeast(1)
                 val ch = (by2 - by1).toInt().coerceAtLeast(1)
                 val cropBmp = Bitmap.createBitmap(bitmap, bx1.toInt(), by1.toInt(), cw, ch)
+                saveDebugBitmap(cropBmp, "crop")
 
-                // Step 2: Deskew
-                val deskewed = ImageProcessor.deskew(cropBmp)
-                sendLog("Deskewed: ${deskewed.width}x${deskewed.height}")
+                sendLog("Crop: ${cropBmp.width}x${cropBmp.height}")
 
-                // Step 3: LPR - recognize characters
-                val lprResult = ImageProcessor.letterbox(deskewed, 640)
-                val lprInput = ImageProcessor.bitmapToFloatArray(lprResult.bitmap)
-                val lprInputTensor = OnnxTensor.createTensor(ortEnv,
-                    FloatBuffer.wrap(lprInput),
-                    longArrayOf(1, 3, 640, 640)
-                )
-                val lprOutput = lprSession!!.run(mapOf("input" to lprInputTensor))
-                lprInputTensor.close()
-                val lprRaw = (lprOutput.get("output").get().value as Array<*>)[0] as Array<FloatArray>
-                sendLog("LPR output: ${lprRaw.size} detections")
+                // Try 4 deskew combinations: (changeCons, centerThres) = (0,0), (0,1), (1,0), (1,1)
+                for (modeXoay in 0..1) {
+                    for (thresholdXoay in 0..1) {
+                        sendLog("Deskew try: changeCons=$modeXoay centerThres=$thresholdXoay")
+                        val deskewed = ImageProcessor.deskew(cropBmp, modeXoay, thresholdXoay)
+                        saveDebugBitmap(deskewed, "deskew_${modeXoay}_${thresholdXoay}")
+                        sendLog("Deskewed: ${deskewed.width}x${deskewed.height}")
 
-                val lprDetections = parseYoloOutput(lprRaw, 0.60f)
-                val chars = ImageProcessor.nms(lprDetections, 0.60f, 0.45f)
-                sendLog("LPR chars: ${chars.size} -> ${chars.map { ImageProcessor.CHAR_MAP[it.cls] }}")
-
-                if (chars.size < 7 || chars.size > 10) {
-                    sendLog("RESULT: ${chars.size} chars (need 7-10) -> unknown")
-                    map.putString("plate", "unknown")
-                } else {
-                    val result = ImageProcessor.readPlate(chars)
-                    sendLog("RESULT: $result")
-                    map.putString("plate", result)
+                        val plateText = runLPR(deskewed)
+                        if (plateText != "unknown") {
+                            finalPlate = plateText
+                            sendLog("LPR success: $finalPlate")
+                            break
+                        }
+                        sendLog("LPR failed for this combination")
+                    }
+                    if (finalPlate != "unknown") break
                 }
-            } else {
-                map.putString("plate", "unknown")
             }
 
+            sendLog("RESULT: $finalPlate")
+            map.putString("plate", finalPlate)
             promise.resolve(map)
         } catch (e: Exception) {
             sendLog("CRASH: ${e.message}")
-            promise.resolve("unknown")
+            try {
+                val m = Arguments.createMap()
+                m.putString("plate", "unknown")
+                promise.resolve(m)
+            } catch (_: Exception) {
+                promise.resolve("unknown")
+            }
         }
     }
 
