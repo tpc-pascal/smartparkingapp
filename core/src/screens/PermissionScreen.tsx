@@ -5,53 +5,97 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  BackHandler,
 } from 'react-native';
 import { useCameraPermission } from 'react-native-vision-camera';
+import { useTheme } from '../theme/ThemeContext';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/types';
+import { useAuth } from '../context/AuthContext';
 import GlassCard from '../components/GlassCard';
+import { getSession, setSettingBool, isOnline } from '../utils/databaseHelper';
 
-interface PermissionScreenProps {
-  onPermissionGranted: () => void;
-}
+function PermissionScreen() {
+  const { colors } = useTheme();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { login } = useAuth();
+  const { requestPermission } = useCameraPermission();
 
-function PermissionScreen({ onPermissionGranted }: PermissionScreenProps) {
-  const { hasPermission, requestPermission } = useCameraPermission();
+  const [cameraGranted, setCameraGranted] = React.useState(false);
+  const [checking, setChecking] = React.useState(false);
+  const [networkChecked, setNetworkChecked] = React.useState(false);
 
   React.useEffect(() => {
-    console.log('[PERMISSION] PermissionScreen mounted');
-    if (hasPermission) {
-      console.log('[PERMISSION] Camera permission already granted, skipping');
-      onPermissionGranted();
+    if (cameraGranted && networkChecked) {
+      (async () => {
+        try { await setSettingBool('permissions_granted', true); } catch {}
+        const session = await getSession();
+        if (session) {
+          login(session.id, session.fullName);
+          navigation.replace('Home');
+          return;
+        }
+        navigation.replace('Login');
+      })();
     }
-  }, [hasPermission, onPermissionGranted]);
+  }, [cameraGranted, networkChecked, login, navigation]);
 
-  async function handleGrantPermission() {
-    console.log('[PERMISSION] User pressed "Cấp quyền Camera", requesting...');
+  async function handleGrantCamera() {
     const granted = await requestPermission();
-    console.log(`[PERMISSION] Permission result: ${granted ? 'GRANTED' : 'DENIED'}`);
-    if (granted) {
-      onPermissionGranted();
-    }
+    if (granted) setCameraGranted(true);
+  }
+
+  async function handleCheckNetwork() {
+    setChecking(true);
+    try { await isOnline(); } catch {}
+    setChecking(false);
+    setNetworkChecked(true);
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Quyền Camera</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.title, { color: colors.text }]}>Yêu cầu thiết lập</Text>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        Vui lòng hoàn tất các bước sau để tiếp tục
+      </Text>
 
-      <GlassCard style={styles.card}>
-        <Text style={styles.message}>
-          SmartParking cần quyền truy cập camera để nhận diện biển số xe một cách chính xác.
-        </Text>
-      </GlassCard>
+      <View style={styles.row}>
+        <GlassCard style={[styles.card, styles.halfCard]}>
+          <Text style={styles.cardIcon}>{cameraGranted ? '✅' : '📷'}</Text>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>Camera</Text>
+          <Text style={[styles.cardDesc, { color: colors.textMuted }]}>Nhận diện biển số</Text>
+          {cameraGranted ? (
+            <Text style={[styles.statusDone, { color: colors.success }]}>✓ Đã cấp</Text>
+          ) : (
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.primary }]} onPress={handleGrantCamera} activeOpacity={0.7}>
+              <Text style={styles.actionBtnText}>Cấp quyền</Text>
+            </TouchableOpacity>
+          )}
+        </GlassCard>
 
-      <TouchableOpacity
-        style={styles.button}
-        onPress={handleGrantPermission}
-        activeOpacity={0.7}>
-        <Text style={styles.buttonText}>Cấp quyền Camera</Text>
-      </TouchableOpacity>
+        <GlassCard style={[styles.card, styles.halfCard]}>
+          <Text style={styles.cardIcon}>{networkChecked ? '✅' : '📶'}</Text>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>Mạng</Text>
+          <Text style={[styles.cardDesc, { color: colors.textMuted }]}>Đồng bộ dữ liệu</Text>
+          {networkChecked ? (
+            <Text style={[styles.statusDone, { color: colors.success }]}>✓ Đã kiểm tra</Text>
+          ) : (
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.accent }]} onPress={handleCheckNetwork} disabled={checking} activeOpacity={0.7}>
+              {checking ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Text style={styles.actionBtnText}>Kiểm tra</Text>}
+            </TouchableOpacity>
+          )}
+        </GlassCard>
+      </View>
 
-      <Text style={styles.disclaimer}>
-        Quyền camera chỉ được sử dụng trong ứng dụng và không được chia sẻ.
+      {(!cameraGranted || !networkChecked) && (
+        <TouchableOpacity style={styles.exitBtn} onPress={() => BackHandler.exitApp()} activeOpacity={0.7}>
+          <Text style={[styles.exitBtnText, { color: colors.textMuted }]}>Thoát</Text>
+        </TouchableOpacity>
+      )}
+
+      <Text style={[styles.disclaimer, { color: colors.textMuted }]}>
+        Camera và kết nối mạng là bắt buộc. Dữ liệu sẽ đồng bộ tự động khi có kết nối mạng.
       </Text>
     </View>
   );
@@ -60,49 +104,39 @@ function PermissionScreen({ onPermissionGranted }: PermissionScreenProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0D0D0D',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  card: {
-    marginBottom: 32,
     paddingHorizontal: 20,
-    paddingVertical: 16,
   },
-  message: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  button: {
-    backgroundColor: '#4A90D9',
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 14,
+  title: { fontSize: 28, fontWeight: '700', marginBottom: 6, textAlign: 'center' },
+  subtitle: { fontSize: 14, marginBottom: 28, textAlign: 'center' },
+  row: { flexDirection: 'row', gap: 12, marginBottom: 28 },
+  card: { flex: 1, alignItems: 'center', paddingVertical: 20, paddingHorizontal: 12 },
+  halfCard: { minHeight: 150 },
+  cardIcon: { fontSize: 36, marginBottom: 10 },
+  cardTitle: { fontSize: 17, fontWeight: '700', marginBottom: 4 },
+  cardDesc: { fontSize: 12, marginBottom: 14, textAlign: 'center' },
+  actionBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
     alignItems: 'center',
-    minWidth: 200,
-    marginBottom: 20,
+    minWidth: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
   },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
+  actionBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  statusDone: { fontSize: 14, fontWeight: '700' },
+  exitBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  disclaimer: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.5)',
-    textAlign: 'center',
-    marginTop: 16,
-  },
+  exitBtnText: { fontSize: 15, fontWeight: '500' },
+  disclaimer: { fontSize: 12, textAlign: 'center', marginTop: 20, paddingHorizontal: 20 },
 });
 
 export default PermissionScreen;

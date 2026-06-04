@@ -18,6 +18,7 @@ object ImageProcessor {
         val canvas = Canvas(padded)
         canvas.drawColor(Color.rgb(114, 114, 114))
         canvas.drawBitmap(resized, px.toFloat(), py.toFloat(), null)
+        resized.recycle()
         return LetterboxResult(padded, s, px.toFloat(), py.toFloat())
     }
 
@@ -41,6 +42,55 @@ object ImageProcessor {
             floats[i + 2 * w * h] = (p and 0xFF) / 255.0f
         }
         return floats
+    }
+
+    fun computeSkewSimple(bitmap: Bitmap): Float {
+        val w = bitmap.width
+        val h = bitmap.height
+        if (w < 10 || h < 10) return 0f
+
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        val gray = FloatArray(w * h)
+        var sum = 0f
+        for (i in pixels.indices) {
+            gray[i] = (Color.red(pixels[i]) * 0.299f + Color.green(pixels[i]) * 0.587f + Color.blue(pixels[i]) * 0.114f) / 255f
+            sum += gray[i]
+        }
+
+        val mean = sum / gray.size
+        var sumW = 0f; var sumB = 0f
+        var cntW = 0; var cntB = 0
+        for (g in gray) {
+            if (g > mean) { sumW += g; cntW++ } else { sumB += g; cntB++ }
+        }
+        val thresh = if (cntB > 0 && cntW > 0) (sumB / cntB + sumW / cntW) / 2f else 0.5f
+
+        val centers = mutableListOf<Pair<Float, Float>>()
+        for (y in 0 until h) {
+            var sx = 0f; var c = 0
+            for (x in 0 until w) {
+                if (gray[y * w + x] < thresh) { sx += x.toFloat(); c++ }
+            }
+            if (c > w * 0.08f) centers.add(Pair(sx / c, y.toFloat()))
+        }
+        if (centers.size < 6) return 0f
+
+        val n = centers.size.toFloat()
+        val sy = centers.sumOf { it.second.toDouble() }.toFloat()
+        val sx = centers.sumOf { it.first.toDouble() }.toFloat()
+        val syy = centers.sumOf { (it.second * it.second).toDouble() }.toFloat()
+        val sxy = centers.sumOf { (it.first * it.second).toDouble() }.toFloat()
+        val a = (n * sxy - sx * sy) / (n * syy - sy * sy)
+        val angle = (atan(a) * 180f / PI.toFloat()).coerceIn(-30f, 30f)
+        return angle
+    }
+
+    fun deskewFast(srcImg: Bitmap): Bitmap {
+        val angle = computeSkewSimple(srcImg)
+        if (abs(angle) < 0.5f) return srcImg
+        return rotateImage(srcImg, angle)
     }
 
     fun changeContrast(bitmap: Bitmap): Bitmap {
@@ -498,6 +548,53 @@ object ImageProcessor {
         }
 
         return edges
+    }
+
+    /**
+     * Compute Laplacian variance as a motion blur metric.
+     * Higher values = sharper image. ~100+ is sharp, <50 is likely blurry.
+     */
+    fun laplacianVariance(bitmap: Bitmap): Float {
+        val w = bitmap.width
+        val h = bitmap.height
+        if (w < 3 || h < 3) return 999f
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+        val gray = FloatArray(w * h)
+        for (i in pixels.indices) {
+            gray[i] = Color.red(pixels[i]) * 0.299f + Color.green(pixels[i]) * 0.587f + Color.blue(pixels[i]) * 0.114f
+        }
+        var sum = 0f
+        var sumSq = 0f
+        var n = 0
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                val idx = y * w + x
+                val lap = gray[idx - w] + gray[idx + w] + gray[idx - 1] + gray[idx + 1] - 4f * gray[idx]
+                sum += lap
+                n++
+            }
+        }
+        val mean = sum / n
+        for (y in 1 until h - 1) {
+            for (x in 1 until w - 1) {
+                val idx = y * w + x
+                val diff = (gray[idx - w] + gray[idx + w] + gray[idx - 1] + gray[idx + 1] - 4f * gray[idx]) - mean
+                sumSq += diff * diff
+            }
+        }
+        return sumSq / n
+    }
+
+    fun isValidVietnamPlate(plate: String): Boolean {
+        val len = plate.length
+        if (len < 7 || len > 10) return false
+        if (len < 2 || !plate[0].isDigit() || !plate[1].isDigit()) return false
+        val lastDigitsStart = len - 4
+        for (i in lastDigitsStart until len) {
+            if (!plate[i].isDigit()) return false
+        }
+        return true
     }
 
     private fun houghLinesP(edges: BooleanArray, width: Int, height: Int, rho: Float, theta: Float, threshold: Int, minLineLength: Float, maxLineGap: Float): List<FloatArray> {

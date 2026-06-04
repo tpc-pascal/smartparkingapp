@@ -1,80 +1,93 @@
-import React, { useState, useEffect } from 'react';
-import { SafeAreaView, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { AppState, StyleSheet, TouchableOpacity } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import SplashScreen from './src/screens/SplashScreen';
-import PermissionScreen from './src/screens/PermissionScreen';
-import HomeScreen from './src/screens/HomeScreen';
-import EntryScreen from './src/screens/EntryScreen';
-import ExitScreen from './src/screens/ExitScreen';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
+import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
+import { AuthProvider } from './src/context/AuthContext';
+import { SessionProvider } from './src/context/SessionContext';
+import { RootStackParamList } from './src/navigation/types';
+import RootNavigator from './src/navigation/RootNavigator';
+import { triggerSync } from './src/utils/databaseHelper';
+import { captureConsole } from './src/utils/consoleCapture';
+import Icon from './src/theme/Icon';
 
-type Screen = 'Splash' | 'Permission' | 'Home' | 'Entry' | 'Exit';
+captureConsole();
 
-function App() {
-  const [currentScreen, setCurrentScreen] = useState<Screen>('Splash');
-  const appStartTime = Date.now();
+function AppContent() {
+  const { colors } = useTheme();
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
+  const appStateRef = useRef(AppState.currentState);
+  const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     console.log(`[App] ===== App mounted at ${new Date().toISOString()} =====`);
-    console.log(`[App] Initial screen: ${currentScreen}`);
-    return () => {
-      console.log(`[App] ===== App unmounted (uptime: ${Date.now() - appStartTime}ms) =====`);
-    };
+    return () => console.log(`[App] ===== Unmounted =====`);
   }, []);
 
   useEffect(() => {
-    console.log(`[App] Screen changed to: ${currentScreen} (${Date.now() - appStartTime}ms since start)`);
-  }, [currentScreen]);
-
-  function handleSplashFinish() {
-    console.log('[App] Splash finished, moving to Permission');
-    setCurrentScreen('Permission');
-  }
-
-  function handlePermissionGranted() {
-    console.log('[App] Permission granted, moving to Home');
-    setCurrentScreen('Home');
-  }
-
-  function handleNavigate(screen: 'Entry' | 'Exit') {
-    console.log(`[App] Navigating to ${screen}`);
-    setCurrentScreen(screen);
-  }
-
-  function handleBack() {
-    console.log('[App] Back to Home');
-    setCurrentScreen('Home');
-  }
-
-  function renderScreen() {
-    switch (currentScreen) {
-      case 'Splash':
-        return <SplashScreen onFinish={handleSplashFinish} />;
-      case 'Permission':
-        return <PermissionScreen onPermissionGranted={handlePermissionGranted} />;
-      case 'Home':
-        return <HomeScreen onNavigate={handleNavigate} />;
-      case 'Entry':
-        return <EntryScreen type="Entry" onBack={handleBack} />;
-      case 'Exit':
-        return <ExitScreen type="Exit" onBack={handleBack} />;
-      default:
-        return <HomeScreen onNavigate={handleNavigate} />;
-    }
-  }
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        triggerSync().catch(() => {});
+        if (appStateRef.current.match(/inactive|background/)) {
+          const currentRouteName = navigationRef.current?.getCurrentRoute()?.name;
+          if (currentRouteName === 'Entry' || currentRouteName === 'Exit') {
+            navigationRef.current?.reset({ index: 0, routes: [{ name: 'Home' }] });
+          }
+        }
+        if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = setInterval(() => { triggerSync().catch(() => {}); }, 15000);
+      } else if (state.match(/inactive|background/)) {
+        if (syncIntervalRef.current) { clearInterval(syncIntervalRef.current); syncIntervalRef.current = null; }
+      }
+      appStateRef.current = state;
+    });
+    if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
+    syncIntervalRef.current = setInterval(() => { triggerSync().catch(() => {}); }, 15000);
+    return () => { sub.remove(); if (syncIntervalRef.current) clearInterval(syncIntervalRef.current); };
+  }, []);
 
   return (
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <NavigationContainer ref={navigationRef}>
+        <RootNavigator />
+      </NavigationContainer>
+
+      <TouchableOpacity style={styles.debugFab} activeOpacity={0.6} onPress={() => navigationRef.current?.navigate('Debug')}>
+        <Icon name="bug" size={18} color="rgba(255,255,255,0.35)" />
+      </TouchableOpacity>
+    </SafeAreaView>
+  );
+}
+
+function App() {
+  return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.container}>
-        {renderScreen()}
-      </SafeAreaView>
+      <ThemeProvider>
+          <AuthProvider>
+            <SessionProvider>
+              <AppContent />
+            </SessionProvider>
+          </AuthProvider>
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0D0D0D',
+  container: { flex: 1 },
+  debugFab: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
 });
 
