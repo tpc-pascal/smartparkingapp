@@ -42,8 +42,8 @@ function ResetPasswordScreen() {
       Alert.alert('Đã gửi mã', 'Vui lòng kiểm tra email');
       setStep(2);
       setTimeout(() => codeRef.current?.focus(), 300);
-    } catch (err: any) {
-      Alert.alert('Lỗi', err.message || 'Email không tồn tại trên hệ thống');
+    } catch (err: unknown) {
+      Alert.alert('Lỗi', err instanceof Error ? err.message : 'Email không tồn tại trên hệ thống');
     } finally { setLoading(false); }
   }
 
@@ -53,8 +53,8 @@ function ResetPasswordScreen() {
     try {
       await verifyResetCode(email.trim(), code.trim(), null);
       setStep(3);
-    } catch (err: any) {
-      Alert.alert('Lỗi', err.message || 'Mã xác thực không đúng');
+    } catch (err: unknown) {
+      Alert.alert('Lỗi', err instanceof Error ? err.message : 'Mã xác thực không đúng');
     } finally { setLoading(false); }
   }
 
@@ -66,8 +66,8 @@ function ResetPasswordScreen() {
       await verifyResetCode(email.trim(), code.trim(), newPassword);
       Alert.alert('Thành công', 'Mật khẩu đã được đặt lại. Vui lòng đăng nhập lại.');
       navigation.goBack();
-    } catch (err: any) {
-      Alert.alert('Lỗi', err.message || 'Không thể đặt lại mật khẩu');
+    } catch (err: unknown) {
+      Alert.alert('Lỗi', err instanceof Error ? err.message : 'Không thể đặt lại mật khẩu');
     } finally { setLoading(false); }
   }
 

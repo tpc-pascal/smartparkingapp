@@ -1,8 +1,7 @@
 package com.smartparkingapp
 
 import android.content.Context
-import android.media.ToneGenerator
-import android.media.AudioManager
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -23,7 +22,11 @@ class SettingsModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     @ReactMethod
     fun getBool(key: String, promise: Promise) {
         try {
-            promise.resolve(prefs.getBoolean(key, false))
+            if (prefs.contains(key)) {
+                promise.resolve(prefs.getBoolean(key, false))
+            } else {
+                promise.resolve(null)
+            }
         } catch (e: Exception) {
             promise.reject("ERROR", e.message)
         }
@@ -60,12 +63,16 @@ class SettingsModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
 
     @ReactMethod
     fun playBeep(volume: Double, promise: Promise) {
+        var mp: MediaPlayer? = null
         try {
             val vol = volume.toInt().coerceIn(0, 100)
-            val tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, vol)
-            tone.startTone(ToneGenerator.TONE_PROP_NACK, 200)
+            mp = MediaPlayer.create(reactApplicationContext, R.raw.success_sound)
+            mp.setVolume(vol / 100f, vol / 100f)
+            mp.setOnCompletionListener { mp?.release() }
+            mp.start()
             promise.resolve(true)
         } catch (e: Exception) {
+            mp?.release()
             promise.reject("ERROR", e.message)
         }
     }

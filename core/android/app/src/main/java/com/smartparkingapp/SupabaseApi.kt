@@ -48,6 +48,33 @@ class SupabaseApi(
     private val jsonType = "application/json; charset=utf-8".toMediaType()
     private val jpegType = "image/jpeg".toMediaType()
 
+    fun deleteAllRows(table: String, tables: List<String>? = null): Boolean {
+        val body = buildJsonObject {
+            addProperty("table", table)
+            if (tables != null) {
+                val arr = JsonArray()
+                tables.forEach { arr.add(it) }
+                add("tables", arr)
+            }
+        }
+        val json = gson.toJson(body)
+        val url = "$functionsUrl/truncate-table"
+        LogBuffer.add("[SUPABASE] deleteAllRows: table=$table tables=$tables")
+        return try {
+            val request = Request.Builder()
+                .url(url)
+                .post(json.toRequestBody(jsonType))
+                .apply { authHeaders().forEach { (k, v) -> addHeader(k, v) } }
+                .build()
+            val resp = client.newCall(request).execute()
+            LogBuffer.add("[SUPABASE] deleteAllRows: ${resp.code}")
+            resp.isSuccessful
+        } catch (e: Exception) {
+            LogBuffer.add("[SUPABASE] deleteAllRows FAILED: ${e.message}")
+            false
+        }
+    }
+
     // ── Auth Headers ──
 
     private fun authHeaders(): Map<String, String> {
@@ -96,15 +123,7 @@ class SupabaseApi(
             }
             val jwt = obj.get("access_token")?.asString
             if (jwt == null) {
-                LogBuffer.add("[AUTH] signUp: no access_token (email confirmation enabled), signing in...")
-                android.util.Log.w("SupabaseApi", "signUp: no access_token, falling back to signIn")
-                val signInResult = signIn(email, password)
-                if (signInResult != null) {
-                    LogBuffer.add("[AUTH] signUp -> signIn OK: uid=${signInResult.uid}")
-                    return signInResult
-                }
-                LogBuffer.add("[AUTH] signUp: fallback signIn also failed: $bodyStr")
-                android.util.Log.e("SupabaseApi", "signUp: fallback signIn failed")
+                LogBuffer.add("[AUTH] signUp: no access_token — email already exists on Supabase")
                 return null
             }
             val refreshToken = obj.get("refresh_token")?.asString ?: ""
@@ -161,6 +180,23 @@ class SupabaseApi(
             LogBuffer.add("[AUTH] signIn exception: ${e.message}")
             android.util.Log.e("SupabaseApi", "signIn exception", e)
             null
+        }
+    }
+
+    fun fetchAuthUser(): Boolean {
+        val url = "$authUrl/user"
+        return try {
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .apply { authHeaders().forEach { (k, v) -> addHeader(k, v) } }
+                .build()
+            val resp = client.newCall(request).execute()
+            LogBuffer.add("[AUTH] fetchAuthUser: ${resp.code}")
+            resp.isSuccessful
+        } catch (e: Exception) {
+            LogBuffer.add("[AUTH] fetchAuthUser exception: ${e.message}")
+            false
         }
     }
 
@@ -517,6 +553,11 @@ class SupabaseApi(
             )
         }
         return list
+    }
+
+    fun fetchTable(tableName: String): JsonArray? {
+        val url = "$restUrl/$tableName?select=*"
+        return get(url)
     }
 
     // ── HTTP helpers ──

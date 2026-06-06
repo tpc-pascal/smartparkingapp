@@ -2,22 +2,49 @@ import { NativeModules } from 'react-native';
 
 const { DatabaseModule } = NativeModules;
 
-export async function checkEmail(email: string): Promise<boolean> {
-  if (!DatabaseModule) return false;
-  return DatabaseModule.checkEmail(email);
+// ── Native Module Return Types ──
+
+interface NativeAttendantResult {
+  id: number;
+  fullName: string;
+  email?: string;
+  isSynced?: boolean;
 }
 
-export async function getDebugLogs(count?: number): Promise<string[]> {
-  if (!DatabaseModule) return [];
-  return DatabaseModule.getDebugLogs(count || 100);
+interface NativeSessionResult {
+  id: number;
+  name: string;
+  status: string;
+  createdAt: string;
+  endedAt?: string;
+  closedOldSession?: string;
 }
 
-export async function isOnline(): Promise<boolean> {
-  if (!DatabaseModule) return false;
-  return DatabaseModule.isOnline();
+interface NativeLogRow {
+  id: number;
+  licensePlate: string;
+  timeIn: string;
+  timeOut?: string;
+  sessionId: number;
+  isSynced?: boolean;
+  serverId?: number;
+  entryImage?: string;
+  exitImage?: string;
+  fee?: number;
 }
 
-// ── Types ──
+interface NativeEndSessionResult {
+  ended: boolean;
+  remaining: number;
+}
+
+interface NativeStatsResult {
+  entryCount: number;
+  exitCount: number;
+  parkedCount: number;
+}
+
+// ── Exported Types ──
 
 export interface AttendantResult {
   id: number;
@@ -55,33 +82,113 @@ export interface TodayStats {
   parkedCount: number;
 }
 
-// ── Attendant ──
+export type SqlResult = Record<string, unknown>;
+
+// ── Helpers ──
+
+const db = {
+  getAttendantById: (id: number) =>
+    (DatabaseModule?.getAttendantById(id) as Promise<NativeAttendantResult>),
+  registerAttendant: (email: string, password: string) =>
+    (DatabaseModule?.registerAttendant(email, password) as Promise<NativeAttendantResult>),
+  loginAttendant: (email: string, password: string) =>
+    (DatabaseModule?.loginAttendant(email, password) as Promise<NativeAttendantResult>),
+  getActiveSession: () =>
+    (DatabaseModule?.getActiveSession() as Promise<NativeSessionResult | null>),
+  createSession: (name: string) =>
+    (DatabaseModule?.createSession(name) as Promise<NativeSessionResult>),
+  endSession: (sessionId: number) =>
+    (DatabaseModule?.endSession(sessionId) as Promise<NativeEndSessionResult>),
+  getRemainingCount: (sessionId: number) =>
+    (DatabaseModule?.getRemainingCount(sessionId) as Promise<number>),
+  getSession: () =>
+    (DatabaseModule?.getSession() as Promise<NativeAttendantResult | null>),
+  executeSql: (sql: string) =>
+    (DatabaseModule?.executeSql(sql) as Promise<SqlResult[]>),
+  verifySessionOnSupabase: () =>
+    (DatabaseModule?.verifySessionOnSupabase() as Promise<boolean>),
+  logout: () =>
+    (DatabaseModule?.logout() as Promise<true>),
+  deleteAccount: () =>
+    (DatabaseModule?.deleteAccount() as Promise<true>),
+  recordEntry: (licensePlate: string, sessionId: number) =>
+    (DatabaseModule?.recordEntry(licensePlate, sessionId) as Promise<{ id: number }>),
+  recordEntryFull: (licensePlate: string, timestamp: string, entryImage: string | null, sessionId: number) =>
+    (DatabaseModule?.recordEntryFull(licensePlate, timestamp, entryImage, sessionId) as Promise<{ id: number }>),
+  recordEntryWithTimestamp: (licensePlate: string, sessionId: number, timestamp: string) =>
+    (DatabaseModule?.recordEntryWithTimestamp(licensePlate, sessionId, timestamp) as Promise<{ id: number }>),
+  recordExit: (licensePlate: string) =>
+    (DatabaseModule?.recordExit(licensePlate) as Promise<number>),
+  recordExitFull: (licensePlate: string, exitImage: string | null) =>
+    (DatabaseModule?.recordExitFull(licensePlate, exitImage) as Promise<number>),
+  getCurrentlyParked: () =>
+    (DatabaseModule?.getCurrentlyParked() as Promise<NativeLogRow[]>),
+  getTodayStats: () =>
+    (DatabaseModule?.getTodayStats() as Promise<NativeStatsResult>),
+  searchParkingLogs: (query: string | null, parked: string | null, offset: number, limit: number) =>
+    (DatabaseModule?.searchParkingLogs(query, parked, offset, limit) as Promise<NativeLogRow[]>),
+  triggerSync: () =>
+    (DatabaseModule?.triggerSync() as Promise<true>),
+  dumpDatabase: () =>
+    (DatabaseModule?.dumpDatabase() as Promise<string>),
+  clearAllTables: () =>
+    DatabaseModule?.clearAllTables() as Promise<void>,
+  deleteSupabaseTable: (tableName: string) =>
+    (DatabaseModule?.deleteSupabaseTable(tableName) as Promise<boolean>),
+  deleteAllSupabaseTables: () =>
+    (DatabaseModule?.deleteAllSupabaseTables() as Promise<boolean>),
+  clearTable: (tableName: string) =>
+    (DatabaseModule?.clearTable(tableName) as Promise<true>),
+  sendResetCode: (email: string) =>
+    (DatabaseModule?.sendResetCode(email) as Promise<boolean>),
+  verifyResetCode: (email: string, code: string, newPassword: string) =>
+    (DatabaseModule?.verifyResetCode(email, code, newPassword) as Promise<boolean>),
+  checkEmail: (email: string) =>
+    (DatabaseModule?.checkEmail(email) as Promise<boolean>),
+  getDebugLogs: (count: number) =>
+    (DatabaseModule?.getDebugLogs(count) as Promise<string[]>),
+  isOnline: () =>
+    (DatabaseModule?.isOnline() as Promise<boolean>),
+};
+
+// ── Public API ──
+
+export async function checkEmail(email: string): Promise<boolean> {
+  if (!DatabaseModule) return false;
+  return db.checkEmail(email);
+}
+
+export async function getDebugLogs(count?: number): Promise<string[]> {
+  if (!DatabaseModule) return [];
+  return db.getDebugLogs(count || 100);
+}
+
+export async function isOnline(): Promise<boolean> {
+  if (!DatabaseModule) return false;
+  return db.isOnline();
+}
 
 export async function getAttendantById(id: number): Promise<AttendantDetail> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const result: any = await DatabaseModule.getAttendantById(id);
-  return { id: result.id, fullName: result.fullName, email: result.email, isSynced: result.isSynced };
+  const r = await db.getAttendantById(id);
+  return { id: r.id, fullName: r.fullName, email: r.email ?? '', isSynced: r.isSynced ?? false };
 }
 
 export async function registerAttendant(email: string, password: string): Promise<AttendantResult> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const result: any = await DatabaseModule.registerAttendant(email, password);
-  return { id: result.id, fullName: result.fullName };
+  const r = await db.registerAttendant(email, password);
+  return { id: r.id, fullName: r.fullName };
 }
 
 export async function loginAttendant(email: string, password: string): Promise<AttendantResult> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const result: any = await DatabaseModule.loginAttendant(email, password);
-  return { id: result.id, fullName: result.fullName };
+  const r = await db.loginAttendant(email, password);
+  return { id: r.id, fullName: r.fullName };
 }
-
-// ── Session ──
-
-// ── Session ──
 
 export async function getActiveSession(): Promise<SessionInfo | null> {
   if (!DatabaseModule) return null;
-  const result: any = await DatabaseModule.getActiveSession();
+  const result = await db.getActiveSession();
   if (!result) return null;
   return {
     id: result.id,
@@ -94,7 +201,7 @@ export async function getActiveSession(): Promise<SessionInfo | null> {
 
 export async function createSession(name: string): Promise<SessionInfo> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const result: any = await DatabaseModule.createSession(name);
+  const result = await db.createSession(name);
   return {
     id: result.id,
     name: result.name,
@@ -107,51 +214,59 @@ export async function createSession(name: string): Promise<SessionInfo> {
 export async function getOrCreateActiveSession(): Promise<SessionInfo> {
   const s = await getActiveSession();
   if (s) return s;
-  return createSession();
+  return createSession('');
 }
 
 export async function endSession(sessionId: number): Promise<{ ended: boolean; remaining: number }> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const result: any = await DatabaseModule.endSession(sessionId);
-  return { ended: result.ended, remaining: result.remaining };
+  return db.endSession(sessionId);
 }
 
 export async function getRemainingCount(sessionId: number): Promise<number> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  return DatabaseModule.getRemainingCount(sessionId);
+  return db.getRemainingCount(sessionId);
 }
 
 export async function getSession(): Promise<AttendantResult | null> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const result: any = await DatabaseModule.getSession();
-  return result ? { id: result.id, fullName: result.fullName } : null;
+  const r = await db.getSession();
+  return r ? { id: r.id, fullName: r.fullName } : null;
 }
 
-export async function executeSql(sql: string): Promise<any[]> {
-  if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  return DatabaseModule.executeSql(sql);
+export async function executeSql(sql: string): Promise<SqlResult[]> {
+  try {
+    const rows: SqlResult[] = await DatabaseModule.executeSql(sql);
+    return rows ?? [];
+  } catch { return []; }
+}
+
+export async function fetchSupabaseTable(tableName: string): Promise<SqlResult[]> {
+  try {
+    const rows: SqlResult[] = await DatabaseModule.fetchSupabaseTable(tableName);
+    return rows ?? [];
+  } catch { return []; }
 }
 
 export async function verifySessionOnSupabase(): Promise<boolean> {
   if (!DatabaseModule) return false;
-  return DatabaseModule.verifySessionOnSupabase();
+  return db.verifySessionOnSupabase();
 }
 
 export async function logout(): Promise<void> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  await DatabaseModule.logout();
+  await db.logout();
 }
 
 export async function deleteAccount(): Promise<void> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  await DatabaseModule.deleteAccount();
+  await db.deleteAccount();
 }
 
 // ── Parking Entry / Exit ──
 
 export async function recordEntry(licensePlate: string, sessionId: number): Promise<number> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const result: any = await DatabaseModule.recordEntry(licensePlate, sessionId);
+  const result = await db.recordEntry(licensePlate, sessionId);
   return result.id;
 }
 
@@ -162,34 +277,33 @@ export async function recordEntryFull(
   sessionId?: number,
 ): Promise<number> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const result: any = await DatabaseModule.recordEntryFull(
-    licensePlate, timestamp, entryImage || null, sessionId || 0
-  );
+  if (!sessionId || sessionId <= 0) throw new Error('sessionId không hợp lệ');
+  const result = await db.recordEntryFull(licensePlate, timestamp, entryImage || null, sessionId);
   return result.id;
 }
 
 export async function recordEntryWithTimestamp(licensePlate: string, sessionId: number, timestamp: string): Promise<number> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const result: any = await DatabaseModule.recordEntryWithTimestamp(licensePlate, sessionId, timestamp);
+  const result = await db.recordEntryWithTimestamp(licensePlate, sessionId, timestamp);
   return result.id;
 }
 
 export async function recordExit(licensePlate: string): Promise<void> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  await DatabaseModule.recordExit(licensePlate);
+  await db.recordExit(licensePlate);
 }
 
 export async function recordExitFull(licensePlate: string, exitImage?: string): Promise<void> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  await DatabaseModule.recordExitFull(licensePlate, exitImage || null);
+  await db.recordExitFull(licensePlate, exitImage || null);
 }
 
 // ── Queries ──
 
 export async function getCurrentlyParked(): Promise<ParkingLogResult[]> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const array: any[] = await DatabaseModule.getCurrentlyParked();
-  return array.map((item: any) => ({
+  const array = await db.getCurrentlyParked();
+  return array.map(item => ({
     id: item.id,
     licensePlate: item.licensePlate,
     timeIn: item.timeIn,
@@ -200,8 +314,7 @@ export async function getCurrentlyParked(): Promise<ParkingLogResult[]> {
 
 export async function getTodayStats(): Promise<TodayStats> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  const result: any = await DatabaseModule.getTodayStats();
-  return { entryCount: result.entryCount, exitCount: result.exitCount, parkedCount: result.parkedCount };
+  return db.getTodayStats();
 }
 
 export async function searchParkingLogs(
@@ -212,8 +325,8 @@ export async function searchParkingLogs(
 ): Promise<ParkingLogResult[]> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
   const parkedStr = onlyParked ? 'true' : null;
-  const array: any[] = await DatabaseModule.searchParkingLogs(query || null, parkedStr, offset || 0, limit || 50);
-  return array.map((item: any) => ({
+  const array = await db.searchParkingLogs(query || null, parkedStr, offset || 0, limit || 50);
+  return array.map(item => ({
     id: item.id,
     licensePlate: item.licensePlate,
     timeIn: item.timeIn,
@@ -229,35 +342,50 @@ export async function searchParkingLogs(
 
 export async function triggerSync(): Promise<void> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  await DatabaseModule.triggerSync();
+  await db.triggerSync();
 }
 
 export async function dumpDatabase(): Promise<string> {
   if (!DatabaseModule) return 'DatabaseModule not available';
-  return DatabaseModule.dumpDatabase();
+  return db.dumpDatabase();
 }
 
 export async function clearAllTables(): Promise<void> {
   if (!DatabaseModule) throw new Error('DatabaseModule not available');
-  await DatabaseModule.clearAllTables();
+  await db.clearAllTables();
+}
+
+export async function deleteSupabaseTable(tableName: string): Promise<boolean> {
+  if (!DatabaseModule) return false;
+  return db.deleteSupabaseTable(tableName);
+}
+
+export async function deleteAllSupabaseTables(): Promise<boolean> {
+  if (!DatabaseModule) return false;
+  return db.deleteAllSupabaseTables();
+}
+
+export async function clearTable(tableName: string): Promise<void> {
+  if (!DatabaseModule) throw new Error('DatabaseModule not available');
+  await db.clearTable(tableName);
 }
 
 export async function sendResetCode(email: string): Promise<boolean> {
   if (!DatabaseModule) return false;
-  return DatabaseModule.sendResetCode(email);
+  return db.sendResetCode(email);
 }
 
 export async function verifyResetCode(email: string, code: string, newPassword: string | null): Promise<boolean> {
   if (!DatabaseModule) return false;
-  return DatabaseModule.verifyResetCode(email, code, newPassword || '');
+  return db.verifyResetCode(email, code, newPassword || '');
 }
 
 // ── Settings ──
 
 const { SettingsModule } = NativeModules;
 
-export async function getSettingBool(key: string): Promise<boolean> {
-  if (!SettingsModule) return false;
+export async function getSettingBool(key: string): Promise<boolean | null> {
+  if (!SettingsModule) return null;
   return SettingsModule.getBool(key);
 }
 

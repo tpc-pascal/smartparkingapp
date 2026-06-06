@@ -15,10 +15,11 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import Icon from '../theme/Icon';
 import CameraView from '../components/CameraView';
-import { recognizePlate, isValidVietnamPlate } from '../utils/plateHelper';
-import { notifySuccess } from '../utils/databaseHelper';
+import { recognizePlate, isValidVietnamPlate, plateToBoxes } from '../utils/plateHelper';
+import { getSettingBool, notifySuccess } from '../utils/databaseHelper';
+import type { Box } from '../components/CameraView';
 
-const SNAP_INTERVAL = 400;
+const SNAP_INTERVAL = 0;
 
 function EntryScreen() {
   const { colors } = useTheme();
@@ -27,21 +28,37 @@ function EntryScreen() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processingRef = useRef(false);
   const mountedRef = useRef(true);
-  const doneRef = useRef(false);
+  const generationRef = useRef(0);
+  const dismissedPlatesRef = useRef(new Set<string>());
+  const pendingPlateRef = useRef<string | null>(null);
+  const showCharBboxesRef = useRef(false);
+
+  useEffect(() => {
+    (async () => {
+      const val = await getSettingBool('show_char_bboxes');
+      showCharBboxesRef.current = val === true;
+    })();
+  }, []);
 
   const [plateText, setPlateText] = useState('');
+  const plateTextRef = useRef(plateText);
+  useEffect(() => { plateTextRef.current = plateText; }, [plateText]);
   const [lpdFound, setLpdFound] = useState(false);
   const [manualActive, setManualActive] = useState(false);
-  const [countdown, setCountdown] = useState(15);
+  const manualActiveRef = useRef(manualActive);
+  useEffect(() => { manualActiveRef.current = manualActive; }, [manualActive]);
+  const [elapsed, setElapsed] = useState(0);
   const [cameraReady, setCameraReady] = useState(false);
   const [scanKey, setScanKey] = useState(0);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [stateBoxes, setStateBoxes] = useState<Box[]>([]);
   const [showPlatePopup, setShowPlatePopup] = useState(false);
   const popupOpacity = useRef(new Animated.Value(0)).current;
   const [showRetryPopup, setShowRetryPopup] = useState(false);
   const retryOpacity = useRef(new Animated.Value(0)).current;
-  const [showTimeoutPopup, setShowTimeoutPopup] = useState(false);
-  const timeoutOpacity = useRef(new Animated.Value(0)).current;
+  const [showUpdatePopup, setShowUpdatePopup] = useState(false);
+  const [pendingNewPlate, setPendingNewPlate] = useState('');
+  const updatePopupOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (lpdFound) {
@@ -78,24 +95,16 @@ function EntryScreen() {
   }, [showRetryPopup, retryOpacity]);
 
   useEffect(() => {
-    if (countdown === 0 && !plateText) {
-      setShowTimeoutPopup(true);
-      Animated.timing(timeoutOpacity, {
+    if (showUpdatePopup) {
+      Animated.timing(updatePopupOpacity, {
         toValue: 1, duration: 250, useNativeDriver: true,
       }).start();
-      const timer = setTimeout(() => {
-        Animated.timing(timeoutOpacity, {
-          toValue: 0, duration: 500, useNativeDriver: true,
-        }).start(() => setShowTimeoutPopup(false));
-      }, 3000);
-      return () => clearTimeout(timer);
     } else {
-      timeoutOpacity.setValue(0);
-      setShowTimeoutPopup(false);
+      updatePopupOpacity.setValue(0);
     }
-  }, [countdown, plateText, timeoutOpacity]);
+  }, [showUpdatePopup, updatePopupOpacity]);
 
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
@@ -104,59 +113,87 @@ function EntryScreen() {
   }, []);
 
   useEffect(() => {
-    setCountdown(15);
-    countdownRef.current = setInterval(() => {
-      setCountdown(prev => prev <= 1 ? 0 : prev - 1);
+    setElapsed(0);
+    elapsedRef.current = setInterval(() => {
+      setElapsed(prev => prev + 1);
     }, 1000);
     return () => {
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
     };
-  }, []);
+  }, [scanKey]);
 
-  useEffect(() => {
-    if (plateText && countdownRef.current) {
-      clearInterval(countdownRef.current);
-      countdownRef.current = null;
+  function processResult(plate: string, boxes: Box[], snapPath?: string | null) {
+    if (!mountedRef.current) return;
+    const hasPlate = !!plate && plate !== 'unknown';
+    const detected = hasPlate ? plate.toUpperCase() : '';
+    const currentPlateText = plateTextRef.current;
+    const currentManualActive = manualActiveRef.current;
+
+    if (currentManualActive) {
+      setLpdFound(hasPlate);
+      if (!hasPlate) return;
+      setStateBoxes(boxes);
+      if (snapPath) setCapturedImage(snapPath);
+      return;
     }
-  }, [plateText]);
+
+    if (currentPlateText) {
+      setLpdFound(hasPlate);
+      if (hasPlate) {
+        setStateBoxes(boxes);
+        if (snapPath) setCapturedImage(snapPath);
+        if (detected !== currentPlateText
+          && isValidVietnamPlate(detected)
+          && !dismissedPlatesRef.current.has(detected)
+          && pendingPlateRef.current !== detected) {
+          pendingPlateRef.current = detected;
+          setPendingNewPlate(detected);
+          setShowUpdatePopup(true);
+        }
+      }
+      return;
+    }
+
+    setLpdFound(hasPlate);
+    if (!hasPlate) return;
+    setStateBoxes(boxes);
+    if (snapPath) setCapturedImage(snapPath);
+
+    if (!isValidVietnamPlate(detected)) {
+      setPlateText(detected);
+      return;
+    }
+
+    setPlateText(detected);
+    notifySuccess().catch(() => {});
+  }
 
   const doRecognize = useCallback(async () => {
     if (processingRef.current || !cameraRef.current?.takeSnapshot) return;
     processingRef.current = true;
+    const currentGen = generationRef.current;
     try {
-      const snapPath = await cameraRef.current.takeSnapshot();
-      if (!snapPath || !mountedRef.current) return;
+      const snapPath: string | null = await cameraRef.current.takeSnapshot();
+      if (!snapPath || !mountedRef.current || currentGen !== generationRef.current) return;
       const result = await recognizePlate(snapPath);
-      if (!mountedRef.current) return;
-      const hasPlate = result.plate && result.plate !== 'unknown';
-      setLpdFound(!!hasPlate);
-      console.log('[Entry] plate:', result.plate);
-      if (hasPlate) {
-        const detected = result.plate.toUpperCase();
-        setCapturedImage(snapPath);
-        if (isValidVietnamPlate(detected)) {
-          setPlateText(detected);
-          doneRef.current = true;
-          notifySuccess().catch(() => {});
-        } else {
-          setPlateText(detected);
-        }
-      }
+      if (!mountedRef.current || currentGen !== generationRef.current) return;
+      const plates = result.plate && result.plate !== 'unknown' ? result.plate : '';
+      const boxes = plateToBoxes(result, showCharBboxesRef.current) as Box[];
+      processResult(plates, boxes, snapPath);
     } catch {
-      // ignore
     } finally {
       processingRef.current = false;
     }
   }, []);
 
   useEffect(() => {
-    doneRef.current = false;
-    const tick = () => {
-      if (doneRef.current || !cameraReady) return;
-      doRecognize();
-      if (!doneRef.current) {
-        timerRef.current = setTimeout(tick, SNAP_INTERVAL);
-      }
+    setCapturedImage(null);
+    setStateBoxes([]);
+    const currentGen = ++generationRef.current;
+    const tick = async () => {
+      if (!cameraReady) return;
+      await doRecognize();
+      if (mountedRef.current) timerRef.current = setTimeout(tick, SNAP_INTERVAL);
     };
     tick();
     return () => {
@@ -165,28 +202,45 @@ function EntryScreen() {
   }, [doRecognize, cameraReady, scanKey]);
 
   const handleRetry = useCallback(() => {
-    if (countdownRef.current) {
-      clearInterval(countdownRef.current);
-      countdownRef.current = null;
-    }
-    doneRef.current = false;
+    generationRef.current++;
+    if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null; }
     setPlateText('');
     setLpdFound(false);
-    setCountdown(15);
-    countdownRef.current = setInterval(() => {
-      setCountdown(prev => prev <= 1 ? 0 : prev - 1);
-    }, 1000);
+    setElapsed(0);
+    elapsedRef.current = setInterval(() => { setElapsed(prev => prev + 1); }, 1000);
     setScanKey(k => k + 1);
     setCapturedImage(null);
+    setStateBoxes([]);
+    dismissedPlatesRef.current = new Set();
+    pendingPlateRef.current = null;
     setShowRetryPopup(true);
-    setShowTimeoutPopup(false);
-    timeoutOpacity.setValue(0);
+    setShowUpdatePopup(false);
   }, []);
+
+  const handleUpdateAccept = useCallback(() => {
+    setPlateText(pendingNewPlate);
+    setShowUpdatePopup(false);
+    notifySuccess().catch(() => {});
+  }, [pendingNewPlate]);
+
+  const handleUpdateDismiss = useCallback(() => {
+    if (pendingNewPlate) dismissedPlatesRef.current.add(pendingNewPlate);
+    setShowUpdatePopup(false);
+  }, [pendingNewPlate]);
 
   const handleConfirm = useCallback(async () => {
     const p = plateText.trim().toUpperCase();
     if (!isValidVietnamPlate(p)) { Alert.alert('Thông báo', 'Biển số không hợp lệ'); return; }
-    navigation.navigate('NfcEntry', { plateText: p, mode: 'write', imageUri: capturedImage });
+    const img = capturedImage;
+    setPlateText('');
+    setLpdFound(false);
+    setCapturedImage(null);
+    setStateBoxes([]);
+    setShowUpdatePopup(false);
+    pendingPlateRef.current = null;
+    dismissedPlatesRef.current = new Set();
+    generationRef.current++;
+    navigation.navigate('NfcEntry', { plateText: p, mode: 'write', imageUri: img || undefined });
   }, [plateText, capturedImage, navigation]);
 
   const plateValid = isValidVietnamPlate(plateText);
@@ -195,10 +249,13 @@ function EntryScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar barStyle="light-content" backgroundColor="#000000" />
       <View style={styles.cameraContainer}>
-        <CameraView ref={cameraRef} style={styles.camera} active={true} onCameraReady={() => setCameraReady(true)} />
+        <CameraView ref={cameraRef} style={styles.camera} active={true} onCameraReady={() => setCameraReady(true)} boxes={stateBoxes} />
         <TouchableOpacity style={styles.backBtnOverlay} onPress={() => navigation.goBack()}>
           <Icon name="back" size={22} color="#FFFFFF" />
         </TouchableOpacity>
+        <View style={styles.timerOverlay}>
+          <Text style={styles.timerText}>{elapsed}s</Text>
+        </View>
         {showPlatePopup && (
           <Animated.View style={[styles.platePopup, { opacity: popupOpacity }]}>
             <Icon name="check" size={16} color="#FFFFFF" />
@@ -211,10 +268,18 @@ function EntryScreen() {
             <Text style={styles.platePopupText}>Đang nhận diện lại...</Text>
           </Animated.View>
         )}
-        {showTimeoutPopup && (
-          <Animated.View style={[styles.timeoutPopup, { opacity: timeoutOpacity }]}>
-            <Icon name="close" size={16} color="#FFFFFF" />
-            <Text style={styles.platePopupText}>Hết thời gian</Text>
+        {showUpdatePopup && (
+          <Animated.View style={[styles.updatePopup, { opacity: updatePopupOpacity }]}>
+            <Text style={styles.updatePopupTitle}>Phát hiện biển số mới</Text>
+            <Text style={styles.updatePopupPlate}>{pendingNewPlate}</Text>
+            <View style={styles.updatePopupActions}>
+              <TouchableOpacity style={styles.updateBtn} onPress={handleUpdateDismiss}>
+                <Text style={styles.updateBtnText}>Bỏ qua</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.updateBtn, styles.updateBtnAccept]} onPress={handleUpdateAccept}>
+                <Text style={styles.updateBtnText}>Cập nhật</Text>
+              </TouchableOpacity>
+            </View>
           </Animated.View>
         )}
       </View>
@@ -224,31 +289,30 @@ function EntryScreen() {
           Quét xe vào
         </Text>
         <View style={[styles.plateInput, { borderColor: colors.inputBorder }]}>
-          {countdown > 0 && !plateText ? (
-            <Text style={{ fontSize: 14, fontWeight: '700', color: colors.textMuted, minWidth: 24, textAlign: 'center' }}>
-              {countdown}s
-            </Text>
-          ) : (
-            <Icon name="camera" size={20} color={colors.textMuted} />
-          )}
+          <Icon name="camera" size={20} color={colors.textMuted} />
           <TextInput
             ref={inputRef}
             style={[styles.plateTextInput, { color: colors.text }]}
-            value={lpdFound && !plateText ? `Đang nhận diện... (${countdown}s)` : plateText}
+            value={lpdFound && !plateText ? `Đang nhận diện... (${elapsed}s)` : plateText}
             onChangeText={setPlateText}
             placeholder=""
             placeholderTextColor={colors.textMuted}
             autoCapitalize="characters"
             editable={manualActive}
           />
-          {(!!plateText || countdown === 0) && (
+          {!!plateText && (
             <TouchableOpacity onPress={() => {
               if (manualActive) {
                 setManualActive(false);
                 inputRef.current?.blur();
               } else {
                 setManualActive(true);
-                inputRef.current?.focus();
+                setTimeout(() => {
+                  inputRef.current?.focus();
+                  inputRef.current?.setNativeProps({
+                    selection: { start: plateText.length, end: plateText.length },
+                  });
+                }, 100);
               }
             }}>
               <Icon name="pencil" size={20} color={colors.textMuted} />
@@ -290,6 +354,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
     zIndex: 10,
   },
+  timerOverlay: {
+    position: 'absolute', top: 16, left: 68,
+    paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 10,
+  },
+  timerText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   bottomPanel: {
     paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40,
     borderTopLeftRadius: 24, borderTopRightRadius: 24,
@@ -337,14 +409,27 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(59,130,246,0.9)',
     zIndex: 20,
   },
-  timeoutPopup: {
-    position: 'absolute', top: 16, right: 16,
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 12, paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: 'rgba(245,158,11,0.9)',
-    zIndex: 20,
+  updatePopup: {
+    position: 'absolute', top: 60, right: 16,
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(30,30,40,0.95)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
+    zIndex: 30,
+    minWidth: 180,
+    alignItems: 'center',
+    gap: 6,
   },
+  updatePopupTitle: { color: '#eab308', fontSize: 12, fontWeight: '600' },
+  updatePopupPlate: { color: '#FFFFFF', fontSize: 18, fontWeight: '800', letterSpacing: 3 },
+  updatePopupActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  updateBtn: {
+    paddingHorizontal: 16, paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  updateBtnAccept: { backgroundColor: 'rgba(5,150,105,0.9)' },
+  updateBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
 });
 
 export default EntryScreen;

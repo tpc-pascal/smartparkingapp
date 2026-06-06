@@ -3,26 +3,28 @@ type LogEntry = { level: 'log' | 'warn' | 'error'; message: string; timestamp: s
 const logs: LogEntry[] = [];
 const MAX_LOGS = 500;
 
-export function captureConsole() {
-  const originalLog = console.log || (() => {});
-  const originalWarn = console.warn || (() => {});
-  const originalError = console.error || (() => {});
+type ConsoleFn = (...args: unknown[]) => void;
 
-  console.log = (...args: any[]) => {
-    originalLog(...args);
-    pushLog('log', args);
+export function captureConsole() {
+  const originalLog: ConsoleFn = console.log || (() => {});
+  const originalWarn: ConsoleFn = console.warn || (() => {});
+  const originalError: ConsoleFn = console.error || (() => {});
+
+  console.log = (...args: unknown[]) => {
+    originalLog.call(console, ...args);
+    try { pushLog('log', args); } catch {}
   };
-  console.warn = (...args: any[]) => {
-    originalWarn(...args);
-    pushLog('warn', args);
+  console.warn = (...args: unknown[]) => {
+    originalWarn.call(console, ...args);
+    try { pushLog('warn', args); } catch {}
   };
-  console.error = (...args: any[]) => {
-    originalError(...args);
-    pushLog('error', args);
+  console.error = (...args: unknown[]) => {
+    originalError.call(console, ...args);
+    try { pushLog('error', args); } catch {}
   };
 }
 
-function pushLog(level: LogEntry['level'], args: any[]) {
+function pushLog(level: LogEntry['level'], args: unknown[]) {
   const message = args
     .map(a => (typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)))
     .join(' ');

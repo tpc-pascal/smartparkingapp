@@ -53,9 +53,11 @@ function AppContent() {
         <RootNavigator />
       </NavigationContainer>
 
-      <TouchableOpacity style={styles.debugFab} activeOpacity={0.6} onPress={() => navigationRef.current?.navigate('Debug')}>
-        <Icon name="bug" size={18} color="rgba(255,255,255,0.35)" />
-      </TouchableOpacity>
+      {__DEV__ && (
+        <TouchableOpacity style={styles.debugFab} activeOpacity={0.6} onPress={() => navigationRef.current?.navigate('Debug')}>
+          <Icon name="bug" size={18} color="rgba(255,255,255,0.35)" />
+        </TouchableOpacity>
+      )}
     </SafeAreaView>
   );
 }

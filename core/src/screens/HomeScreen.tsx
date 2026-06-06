@@ -22,11 +22,19 @@ import { useSession } from '../context/SessionContext';
 
 type StatKey = 'entryCount' | 'exitCount' | 'parkedCount';
 
-const STAT_ITEMS: { key: StatKey; label: string; icon: React.ReactNode }[] = [
-  { key: 'entryCount', label: 'Xe vào', icon: <Icon name="entry" size={22} /> },
-  { key: 'exitCount', label: 'Xe ra', icon: <Icon name="exit" size={22} /> },
-  { key: 'parkedCount', label: 'Trong bãi', icon: <Icon name="car" size={22} /> },
+const STAT_ITEMS: { key: StatKey; label: string }[] = [
+  { key: 'parkedCount', label: 'Trong bãi' },
+  { key: 'entryCount', label: 'Xe vào' },
+  { key: 'exitCount', label: 'Xe ra' },
 ];
+
+const formatImageUri = (uri: string | null | undefined): string | undefined => {
+  if (!uri) return undefined;
+  if (uri.startsWith('http://') || uri.startsWith('https://') || uri.startsWith('file://') || uri.startsWith('data:')) {
+    return uri;
+  }
+  return `file://${uri}`;
+};
 
 function HomeScreen() {
   const { colors } = useTheme();
@@ -53,7 +61,7 @@ function HomeScreen() {
   useEffect(() => { refresh(); }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => { isOnline().then(setOnline).catch(() => {}); }, 30000);
+    const interval = setInterval(async () => { try { setOnline(await isOnline()); } catch {} }, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -93,8 +101,8 @@ function HomeScreen() {
       await createNewSession(name);
       await refreshSession();
       refresh();
-    } catch (e: any) {
-      Alert.alert('Lỗi', `Không thể tạo phiên:\n${e?.message || e}`);
+    } catch (e: unknown) {
+      Alert.alert('Lỗi', `Không thể tạo phiên:\n${e instanceof Error ? e.message : 'Lỗi không xác định'}`);
     }
   }, [createNewSession, refreshSession, refresh]);
 
@@ -135,40 +143,37 @@ function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.statsRow}>
-            {STAT_ITEMS.map(({ key, label, icon }) => (
-              <View key={key} style={[styles.statCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
-                <View style={[styles.statIconWrap, { backgroundColor: colors.primaryLight }]}>
-                  {icon}
-                </View>
-                <Text style={[styles.statValue, { color: colors.text }]}>{stats[key]}</Text>
-                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{label}</Text>
-              </View>
-            ))}
-          </View>
-
           <View style={styles.actionsRow}>
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('Entry')} activeOpacity={0.7}>
-              <View style={[styles.actionIconWrap, { backgroundColor: colors.primaryLight }]}>
-                <Icon name="camera" size={24} color={colors.primary} />
+              <View style={styles.actionIconWrap}>
+                <Icon name="entry" size={36} color={colors.primary} />
               </View>
               <Text style={[styles.actionLabel, { color: colors.text }]}>Quét xe vào</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('Exit')} activeOpacity={0.7}>
-              <View style={[styles.actionIconWrap, { backgroundColor: colors.accentLight }]}>
-                <Icon name="car" size={24} color={colors.accent} />
+              <View style={styles.actionIconWrap}>
+                <Icon name="exit" size={36} color={colors.accent} />
               </View>
               <Text style={[styles.actionLabel, { color: colors.text }]}>Quét xe ra</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('History')} activeOpacity={0.7}>
-              <View style={[styles.actionIconWrap, { backgroundColor: colors.primaryLight }]}>
-                <Icon name="history" size={24} color={colors.primary} />
+              <View style={styles.actionIconWrap}>
+                <Icon name="history" size={36} color={colors.success} />
               </View>
               <Text style={[styles.actionLabel, { color: colors.text }]}>Lịch sử</Text>
             </TouchableOpacity>
           </View>
 
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Xe đang trong bãi</Text>
+
+          <View style={styles.statsRow}>
+            {STAT_ITEMS.map(({ key, label }) => (
+              <View key={key} style={[styles.statCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+                <Text style={[styles.statValue, { color: colors.text }]}>{stats[key]}</Text>
+                <Text style={[styles.statLabel, { color: colors.textSecondary }]}>{label}</Text>
+              </View>
+            ))}
+          </View>
 
           <FlatList
             data={parked}
@@ -178,7 +183,7 @@ function HomeScreen() {
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={[styles.parkedCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}
-                onPress={() => item.entryImage ? setExpandedImage(item.entryImage) : null}
+                onPress={() => item.entryImage ? setExpandedImage(formatImageUri(item.entryImage) || null) : null}
                 activeOpacity={0.7}
               >
                 <View style={[styles.parkedLeft, { backgroundColor: colors.successLight }]}>
@@ -189,7 +194,7 @@ function HomeScreen() {
                   <Text style={[styles.parkedTime, { color: colors.textSecondary }]}>Vào lúc: {new Date(item.timeIn).toLocaleTimeString('vi-VN')}</Text>
                 </View>
                 {item.entryImage ? (
-                  <Image source={{ uri: item.entryImage }} style={styles.parkedImage} />
+                  <Image source={{ uri: formatImageUri(item.entryImage) }} style={styles.parkedImage} />
                 ) : null}
               </TouchableOpacity>
             )}
@@ -289,14 +294,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     gap: 4,
-  },
-  statIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 2,
   },
   statValue: { fontSize: 24, fontWeight: '800' },
   statLabel: { fontSize: 11, fontWeight: '500' },

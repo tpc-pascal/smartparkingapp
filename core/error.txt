@@ -1,0 +1,261 @@
+[23:31:33.331] LPR: Main bitmap recycled
+[23:31:33.331] LPR: Temp snapshot deleted: /data/user/0/com.smartparkingapp/cache/mrousavy8058233637989205840.jpg
+[23:31:33.675] LPR: ===> recognizePlate: /data/user/0/com.smartparkingapp/cache/mrousavy237537946144136403.jpg
+[23:31:33.699] LPR: Bitmap decoded: 1080x1544
+[23:31:33.700] LPR: LPD: letterbox + inference...
+[23:31:34.894] LPR: LPD max objConf=0,0013 row=[20,763, 617,691, 44,690, 66,716, 0,001, 1,000]
+[23:31:34.895] LPR: LPD after parse: 0 detections above 0.25
+[23:31:34.895] LPR: LPD after NMS: 0 plate(s)
+[23:31:34.896] LPR: LPD found 0 plates
+[23:31:34.896] LPR: RESULT: 
+[23:31:34.897] LPR: Main bitmap recycled
+[23:31:34.898] LPR: Temp snapshot deleted: /data/user/0/com.smartparkingapp/cache/mrousavy237537946144136403.jpg
+[23:31:35.346] LPR: ===> recognizePlate: /data/user/0/com.smartparkingapp/cache/mrousavy4744273178869801074.jpg
+[23:31:35.360] LPR: Bitmap decoded: 1080x1544
+[23:31:35.360] LPR: LPD: letterbox + inference...
+[23:31:36.601] LPR: LPD max objConf=0,0015 row=[20,819, 617,776, 44,475, 64,918, 0,002, 1,000]
+[23:31:36.604] LPR: LPD after parse: 0 detections above 0.25
+[23:31:36.605] LPR: LPD after NMS: 0 plate(s)
+[23:31:36.605] LPR: LPD found 0 plates
+[23:31:36.605] LPR: RESULT: 
+[23:31:36.606] LPR: Main bitmap recycled
+[23:31:36.606] LPR: Temp snapshot deleted: /data/user/0/com.smartparkingapp/cache/mrousavy4744273178869801074.jpg
+[23:31:37.078] LPR: ===> recognizePlate: /data/user/0/com.smartparkingapp/cache/mrousavy5684363134882137096.jpg
+[23:31:37.099] LPR: Bitmap decoded: 1080x1544
+[23:31:37.100] LPR: LPD: letterbox + inference...
+[23:31:38.339] LPR: LPD max objConf=0,9241 row=[317,551, 437,713, 238,287, 188,610, 0,924, 1,000]
+[23:31:38.342] LPR: LPD after parse: 14 detections above 0.25
+[23:31:38.342] LPR: LPD after NMS: 1 plate(s)
+[23:31:38.344] LPR: Track: new position (534,1056) delta=99,000
+[23:31:38.344] LPR: Track: position (534,1056) est delta=99,000
+[23:31:38.365] LPR: Blur: Laplacian variance=31,0
+[23:31:38.366] LPR: Crop: (247.0589,828.4723)-(821.92584,1283.4938) -> 574x455
+[23:31:38.367] LPR: LPR on raw crop (fast path)...
+[23:31:39.604] LPR: LPR: 62S35031 conf=0,919 (8 chars)
+[23:31:39.605] LPR: Raw conf=0,919 >= 0.80, skipping deskew
+[23:31:39.605] LPR: LPR result: 62S35031 conf=0,919
+[23:31:39.605] LPR: Vote: no consensus yet (62S35031=1)
+[23:31:39.606] LPR: RESULT: 62S35031
+[23:31:39.607] LPR: Main bitmap recycled
+[23:31:39.607] LPR: Temp snapshot deleted: /data/user/0/com.smartparkingapp/cache/mrousavy5684363134882137096.jpg
+[23:31:41.490] [SYNC] SyncWorker started
+[23:31:41.492] [SYNC] Pushing 0 unsynced attendants
+[23:31:41.492] [SYNC] Pushing 0 unsynced sessions
+[23:31:41.492] [SYNC] Pushing 0 unsynced parking logs
+[23:31:41.492] [SYNC] Last sync timestamp: 2026-05-31T23:31:28Z
+[23:31:41.901] [SYNC] Pulling 0 remote parking logs
+[23:31:41.902] [SYNC] Uploading 1 pending images
+[23:31:41.903] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy4777339303273741202.jpg
+[23:31:41.903] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy3256656029821536703.jpg
+[23:31:41.903] [SYNC] Updated last sync: 2026-05-31T23:31:41Z
+[23:31:41.903] [SYNC] SyncWorker finished, hasFailure=true
+[23:31:45.536] [SYNC] SyncWorker started
+[23:31:45.539] [SYNC] Pushing 0 unsynced attendants
+[23:31:45.539] [SYNC] Pushing 0 unsynced sessions
+[23:31:45.540] [SYNC] Pushing 0 unsynced parking logs
+[23:31:45.540] [SYNC] Last sync timestamp: 2026-05-31T23:31:41Z
+[23:31:45.687] [SYNC] Pulling 0 remote parking logs
+[23:31:45.688] [SYNC] Uploading 1 pending images
+[23:31:45.689] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy4777339303273741202.jpg
+[23:31:45.689] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy3256656029821536703.jpg
+[23:31:45.690] [SYNC] Updated last sync: 2026-05-31T23:31:45Z
+[23:31:45.690] [SYNC] SyncWorker finished, hasFailure=true
+[23:31:48.378] [DB] Entry inserted local: 62S35031 -> id=2 sid=1
+[23:31:48.379] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy5684363134882137096.jpg
+[23:31:48.559] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:31:48.560] [AUTH] refreshToken: calling https://qnmezcsbmjxukpgqvblh.supabase.co/auth/v1/token?grant_type=refresh_token
+[23:31:48.907] [AUTH] refreshToken OK: uid=25e6a838-66cf-4a0a-ac84-87447da0933a
+[23:31:48.911] [DB] JWT refreshed for tpcmemory2005@gmail.com
+[23:31:49.068] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:31:49.069] [DB] pushParkingLog failed, enqueue sync
+[23:31:49.202] [SYNC] SyncWorker started
+[23:31:49.206] [SYNC] Pushing 0 unsynced attendants
+[23:31:49.207] [SYNC] Pushing 0 unsynced sessions
+[23:31:49.208] [SYNC] Pushing 1 unsynced parking logs
+[23:31:49.326] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:31:49.328] [AUTH] refreshToken: calling https://qnmezcsbmjxukpgqvblh.supabase.co/auth/v1/token?grant_type=refresh_token
+[23:31:49.440] [AUTH] refreshToken OK: uid=25e6a838-66cf-4a0a-ac84-87447da0933a
+[23:31:49.442] [SYNC] JWT refreshed for tpcmemory2005@gmail.com
+[23:31:49.558] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:31:49.558] [SYNC] Last sync timestamp: 2026-05-31T23:31:45Z
+[23:31:49.664] [SYNC] Pulling 0 remote parking logs
+[23:31:49.665] [SYNC] Uploading 1 pending images
+[23:31:49.666] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy4777339303273741202.jpg
+[23:31:49.666] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy3256656029821536703.jpg
+[23:31:49.667] [SYNC] Updated last sync: 2026-05-31T23:31:49Z
+[23:31:49.667] [SYNC] SyncWorker finished, hasFailure=true
+[23:31:52.077] LPR: ===> recognizePlate: /data/user/0/com.smartparkingapp/cache/mrousavy2814914990481615342.jpg
+[23:31:52.111] LPR: Bitmap decoded: 1080x1544
+[23:31:52.112] LPR: LPD: letterbox + inference...
+[23:31:53.499] LPR: LPD max objConf=0,0018 row=[245,928, 268,610, 778,116, 666,362, 0,002, 1,000]
+[23:31:53.500] LPR: LPD after parse: 0 detections above 0.25
+[23:31:53.500] LPR: LPD after NMS: 0 plate(s)
+[23:31:53.500] LPR: LPD found 0 plates
+[23:31:53.500] LPR: RESULT: 
+[23:31:53.501] LPR: Main bitmap recycled
+[23:31:53.502] LPR: Temp snapshot deleted: /data/user/0/com.smartparkingapp/cache/mrousavy2814914990481615342.jpg
+[23:31:53.727] LPR: ===> recognizePlate: /data/user/0/com.smartparkingapp/cache/mrousavy4078486255302778309.jpg
+[23:31:53.748] LPR: Bitmap decoded: 1080x1544
+[23:31:53.748] LPR: LPD: letterbox + inference...
+[23:31:55.025] LPR: LPD max objConf=0,8943 row=[187,803, 203,447, 171,048, 146,983, 0,894, 1,000]
+[23:31:55.027] LPR: LPD after parse: 9 detections above 0.25
+[23:31:55.028] LPR: LPD after NMS: 1 plate(s)
+[23:31:55.029] LPR: Track: new position (221,491) delta=0,656
+[23:31:55.030] LPR: Track: position (221,491) est delta=0,656
+[23:31:55.033] LPR: Blur: Laplacian variance=35,4
+[23:31:55.033] LPR: Crop: (15.147129,313.5176)-(427.80078,668.11346) -> 412x354
+[23:31:55.034] LPR: LPR on raw crop (fast path)...
+[23:31:56.463] LPR: LPR nms returned 0 chars (expect 7-10)
+[23:31:56.464] LPR: Raw crop conf=0,000 < 0.80, trying fast deskew...
+[23:31:57.837] LPR: LPR nms returned 1 chars (expect 7-10)
+[23:31:57.838] LPR: Best conf=0,000 < 0.75, trying CLAHE deskew...
+[23:31:58.361] [SYNC] SyncWorker started
+[23:31:58.362] [SYNC] Pushing 0 unsynced attendants
+[23:31:58.362] [SYNC] Pushing 0 unsynced sessions
+[23:31:58.363] [SYNC] Pushing 1 unsynced parking logs
+[23:31:58.500] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:31:58.501] [AUTH] refreshToken: calling https://qnmezcsbmjxukpgqvblh.supabase.co/auth/v1/token?grant_type=refresh_token
+[23:31:58.611] [AUTH] refreshToken OK: uid=25e6a838-66cf-4a0a-ac84-87447da0933a
+[23:31:58.623] [SYNC] JWT refreshed for tpcmemory2005@gmail.com
+[23:31:58.785] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:31:58.786] [SYNC] Last sync timestamp: 2026-05-31T23:31:49Z
+[23:31:58.903] [SYNC] Pulling 0 remote parking logs
+[23:31:58.904] [SYNC] Uploading 1 pending images
+[23:31:58.905] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy4777339303273741202.jpg
+[23:31:58.906] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy3256656029821536703.jpg
+[23:31:58.906] [SYNC] Updated last sync: 2026-05-31T23:31:58Z
+[23:31:58.906] [SYNC] SyncWorker finished, hasFailure=true
+[23:31:59.538] LPR: LPR nms returned 0 chars (expect 7-10)
+[23:32:00.544] [SYNC] SyncWorker started
+[23:32:00.546] [SYNC] Pushing 0 unsynced attendants
+[23:32:00.546] [SYNC] Pushing 0 unsynced sessions
+[23:32:00.546] [SYNC] Pushing 1 unsynced parking logs
+[23:32:00.679] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:00.680] [AUTH] refreshToken: calling https://qnmezcsbmjxukpgqvblh.supabase.co/auth/v1/token?grant_type=refresh_token
+[23:32:00.806] [AUTH] refreshToken OK: uid=25e6a838-66cf-4a0a-ac84-87447da0933a
+[23:32:00.809] [SYNC] JWT refreshed for tpcmemory2005@gmail.com
+[23:32:00.983] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:00.983] [SYNC] Last sync timestamp: 2026-05-31T23:31:58Z
+[23:32:01.121] [SYNC] Pulling 0 remote parking logs
+[23:32:01.124] [SYNC] Uploading 1 pending images
+[23:32:01.126] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy4777339303273741202.jpg
+[23:32:01.130] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy3256656029821536703.jpg
+[23:32:01.130] [SYNC] Updated last sync: 2026-05-31T23:32:01Z
+[23:32:01.131] [SYNC] SyncWorker finished, hasFailure=true
+[23:32:09.420] LPR: LPR nms returned 0 chars (expect 7-10)
+[23:32:09.421] LPR: Rejected (invalid VN format): unknown
+[23:32:09.421] LPR: LPR result: unknown conf=0,000
+[23:32:09.421] LPR: Vote: no consensus yet (62S35031=1, unknown=1)
+[23:32:09.422] LPR: RESULT: unknown
+[23:32:09.422] LPR: Main bitmap recycled
+[23:32:09.423] LPR: Temp snapshot deleted: /data/user/0/com.smartparkingapp/cache/mrousavy4078486255302778309.jpg
+[23:32:09.770] LPR: ===> recognizePlate: /data/user/0/com.smartparkingapp/cache/mrousavy9106005380095559594.jpg
+[23:32:09.795] LPR: Bitmap decoded: 1080x1544
+[23:32:09.796] LPR: LPD: letterbox + inference...
+[23:32:11.184] LPR: LPD max objConf=0,9174 row=[331,383, 321,761, 262,504, 205,271, 0,917, 1,000]
+[23:32:11.184] LPR: LPD after parse: 10 detections above 0.25
+[23:32:11.185] LPR: LPD after NMS: 1 plate(s)
+[23:32:11.186] LPR: Track: new position (568,776) delta=0,506
+[23:32:11.186] LPR: Track: position (568,776) est delta=0,506
+[23:32:11.191] LPR: Blur: Laplacian variance=15,6
+[23:32:11.191] LPR: Crop: (251.21721,528.6395)-(884.5078,1023.85535) -> 633x495
+[23:32:11.192] LPR: LPR on raw crop (fast path)...
+[23:32:12.484] LPR: LPR: 62S35031 conf=0,900 (8 chars)
+[23:32:12.485] LPR: Raw conf=0,900 >= 0.80, skipping deskew
+[23:32:12.485] LPR: LPR result: 62S35031 conf=0,900
+[23:32:12.485] LPR: Vote: 62S35031 appeared 2/3 frames
+[23:32:12.486] LPR: RESULT: 62S35031
+[23:32:12.487] LPR: Main bitmap recycled
+[23:32:12.487] LPR: Temp snapshot deleted: /data/user/0/com.smartparkingapp/cache/mrousavy9106005380095559594.jpg
+[23:32:15.526] [SYNC] SyncWorker started
+[23:32:15.529] [SYNC] Pushing 0 unsynced attendants
+[23:32:15.529] [SYNC] Pushing 0 unsynced sessions
+[23:32:15.529] [SYNC] Pushing 1 unsynced parking logs
+[23:32:15.654] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:15.655] [AUTH] refreshToken: calling https://qnmezcsbmjxukpgqvblh.supabase.co/auth/v1/token?grant_type=refresh_token
+[23:32:15.778] [AUTH] refreshToken OK: uid=25e6a838-66cf-4a0a-ac84-87447da0933a
+[23:32:15.781] [SYNC] JWT refreshed for tpcmemory2005@gmail.com
+[23:32:15.903] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:15.903] [SYNC] Last sync timestamp: 2026-05-31T23:32:01Z
+[23:32:16.015] [SYNC] Pulling 0 remote parking logs
+[23:32:16.016] [SYNC] Uploading 1 pending images
+[23:32:16.016] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy4777339303273741202.jpg
+[23:32:16.017] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy3256656029821536703.jpg
+[23:32:16.017] [SYNC] Updated last sync: 2026-05-31T23:32:16Z
+[23:32:16.017] [SYNC] SyncWorker finished, hasFailure=true
+[23:32:17.055] [SYNC] SyncWorker started
+[23:32:17.058] [SYNC] Pushing 0 unsynced attendants
+[23:32:17.058] [SYNC] Pushing 0 unsynced sessions
+[23:32:17.059] [SYNC] Pushing 1 unsynced parking logs
+[23:32:17.181] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:17.183] [AUTH] refreshToken: calling https://qnmezcsbmjxukpgqvblh.supabase.co/auth/v1/token?grant_type=refresh_token
+[23:32:17.321] [AUTH] refreshToken OK: uid=25e6a838-66cf-4a0a-ac84-87447da0933a
+[23:32:17.327] [SYNC] JWT refreshed for tpcmemory2005@gmail.com
+[23:32:17.467] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:17.468] [SYNC] Last sync timestamp: 2026-05-31T23:32:16Z
+[23:32:17.598] [SYNC] Pulling 0 remote parking logs
+[23:32:17.600] [SYNC] Uploading 1 pending images
+[23:32:17.602] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy4777339303273741202.jpg
+[23:32:17.603] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy3256656029821536703.jpg
+[23:32:17.604] [SYNC] Updated last sync: 2026-05-31T23:32:17Z
+[23:32:17.604] [SYNC] SyncWorker finished, hasFailure=true
+[23:32:19.393] [DB] Exit local: 62S35031 rows=1
+[23:32:19.399] [DB] Exit no serverId (null), enqueue sync
+[23:32:19.400] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy9106005380095559594.jpg
+[23:32:19.486] [SYNC] SyncWorker started
+[23:32:19.492] [SYNC] Pushing 0 unsynced attendants
+[23:32:19.493] [SYNC] Pushing 0 unsynced sessions
+[23:32:19.494] [SYNC] Pushing 1 unsynced parking logs
+[23:32:19.637] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:19.640] [AUTH] refreshToken: calling https://qnmezcsbmjxukpgqvblh.supabase.co/auth/v1/token?grant_type=refresh_token
+[23:32:19.790] [AUTH] refreshToken OK: uid=25e6a838-66cf-4a0a-ac84-87447da0933a
+[23:32:19.794] [SYNC] JWT refreshed for tpcmemory2005@gmail.com
+[23:32:19.964] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:19.964] [SYNC] Last sync timestamp: 2026-05-31T23:32:17Z
+[23:32:20.103] [SYNC] Pulling 0 remote parking logs
+[23:32:20.105] [SYNC] Uploading 1 pending images
+[23:32:20.107] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy4777339303273741202.jpg
+[23:32:20.108] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy3256656029821536703.jpg
+[23:32:20.108] [SYNC] Updated last sync: 2026-05-31T23:32:20Z
+[23:32:20.109] [SYNC] SyncWorker finished, hasFailure=true
+[23:32:47.651] [SYNC] SyncWorker started
+[23:32:47.658] [SYNC] Pushing 0 unsynced attendants
+[23:32:47.659] [SYNC] Pushing 0 unsynced sessions
+[23:32:47.660] [SYNC] Pushing 1 unsynced parking logs
+[23:32:47.812] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:47.813] [AUTH] refreshToken: calling https://qnmezcsbmjxukpgqvblh.supabase.co/auth/v1/token?grant_type=refresh_token
+[23:32:47.927] [AUTH] refreshToken OK: uid=25e6a838-66cf-4a0a-ac84-87447da0933a
+[23:32:47.933] [SYNC] JWT refreshed for tpcmemory2005@gmail.com
+[23:32:48.055] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:48.055] [SYNC] Last sync timestamp: 2026-05-31T23:32:20Z
+[23:32:48.163] [SYNC] Pulling 0 remote parking logs
+[23:32:48.164] [SYNC] Uploading 1 pending images
+[23:32:48.164] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy4777339303273741202.jpg
+[23:32:48.165] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy3256656029821536703.jpg
+[23:32:48.165] [SYNC] Updated last sync: 2026-05-31T23:32:48Z
+[23:32:48.165] [SYNC] SyncWorker finished, hasFailure=true
+[23:32:50.125] [SYNC] SyncWorker started
+[23:32:50.127] [SYNC] Pushing 0 unsynced attendants
+[23:32:50.127] [SYNC] Pushing 0 unsynced sessions
+[23:32:50.128] [SYNC] Pushing 1 unsynced parking logs
+[23:32:50.255] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:50.259] [AUTH] refreshToken: calling https://qnmezcsbmjxukpgqvblh.supabase.co/auth/v1/token?grant_type=refresh_token
+[23:32:50.396] [AUTH] refreshToken OK: uid=25e6a838-66cf-4a0a-ac84-87447da0933a
+[23:32:50.400] [SYNC] JWT refreshed for tpcmemory2005@gmail.com
+[23:32:50.535] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:50.536] [SYNC] Last sync timestamp: 2026-05-31T23:32:48Z
+[23:32:50.655] [SYNC] Pulling 0 remote parking logs
+[23:32:50.657] [SYNC] Uploading 1 pending images
+[23:32:50.659] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy4777339303273741202.jpg
+[23:32:50.660] [SUPABASE] uploadImage: file not found /data/user/0/com.smartparkingapp/cache/mrousavy3256656029821536703.jpg
+[23:32:50.661] [SYNC] Updated last sync: 2026-05-31T23:32:50Z
+[23:32:50.661] [SYNC] SyncWorker finished, hasFailure=true
+[23:32:58.944] [SYNC] SyncWorker started
+[23:32:58.949] [SYNC] Pushing 0 unsynced attendants
+[23:32:58.950] [SYNC] Pushing 0 unsynced sessions
+[23:32:58.951] [SYNC] Pushing 1 unsynced parking logs
+[23:32:59.118] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","details":null,"hint":null,"message":"new row violates row-level security policy for table \"parking_logs\""}
+[23:32:59.122] [AUTH] refreshToken: calling https://qnmezcsbmjxukpgqvblh.supabase.co/auth/v1/token?grant_type=refresh_token
+[23:32:59.245] [AUTH] refreshToken OK: uid=25e6a838-66cf-4a0a-ac84-87447da0933a
+[23:32:59.250] [SYNC] JWT refreshed for tpcmemory2005@gmail.com
+[23:32:59.381] [SUPABASE] POST parking_logs failed: 403 {"code":"42501","deta

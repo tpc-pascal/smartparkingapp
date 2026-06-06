@@ -30,18 +30,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { refresh(); }, [refresh]);
 
   const createNewSession = useCallback(async (name: string) => {
-    try {
-      const s = await dbCreateSession(name);
-      setSession(s);
-    } catch (e) {
-      console.error('[Session] createNewSession error', e);
-    }
+    const s = await dbCreateSession(name);
+    setSession(s);
   }, []);
 
   const endCurrentSession = useCallback(async () => {
     if (!session) return { ended: false, remaining: 0 };
     const result = await dbEndSession(session.id);
-    setSession(null);
+    if (result.ended) {
+      setSession(null);
+    }
     return result;
   }, [session]);
 

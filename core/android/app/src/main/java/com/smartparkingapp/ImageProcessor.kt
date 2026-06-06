@@ -29,6 +29,13 @@ object ImageProcessor {
         val padY: Float
     )
 
+    data class LetterboxFloatResult(
+        val floats: FloatArray,
+        val scale: Float,
+        val padX: Float,
+        val padY: Float
+    )
+
     fun bitmapToFloatArray(bitmap: Bitmap): FloatArray {
         val w = bitmap.width
         val h = bitmap.height
@@ -42,6 +49,45 @@ object ImageProcessor {
             floats[i + 2 * w * h] = (p and 0xFF) / 255.0f
         }
         return floats
+    }
+
+    fun letterboxToFloatArray(bitmap: Bitmap, size: Int): LetterboxFloatResult {
+        val floats = FloatArray(3 * size * size)
+        val result = fillLetterboxFloat(bitmap, floats, size)
+        return LetterboxFloatResult(floats, result.scale, result.padX, result.padY)
+    }
+
+    fun fillLetterboxFloat(bitmap: Bitmap, out: FloatArray, size: Int): LetterboxFloatResult {
+        val w = bitmap.width; val h = bitmap.height
+        val s = minOf(size.toFloat() / w, size.toFloat() / h)
+        val nw = (w * s).toInt().coerceAtLeast(1)
+        val nh = (h * s).toInt().coerceAtLeast(1)
+        val px = (size - nw) / 2f; val py = (size - nh) / 2f
+
+        val gray = 114f / 255f
+        out.fill(gray)
+
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        val stepX = w.toFloat() / nw
+        val stepY = h.toFloat() / nh
+
+        for (sy in 0 until nh) {
+            val srcY = (sy * stepY).toInt().coerceIn(0, h - 1)
+            for (sx in 0 until nw) {
+                val srcX = (sx * stepX).toInt().coerceIn(0, w - 1)
+                val p = pixels[srcY * w + srcX]
+                val dx = (sx + px).toInt()
+                val dy = (sy + py).toInt()
+                val idx = dy * size + dx
+                out[idx] = ((p shr 16) and 0xFF) / 255f
+                out[idx + size * size] = ((p shr 8) and 0xFF) / 255f
+                out[idx + 2 * size * size] = (p and 0xFF) / 255f
+            }
+        }
+
+        return LetterboxFloatResult(out, s, px, py)
     }
 
     fun computeSkewSimple(bitmap: Bitmap): Float {
