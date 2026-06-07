@@ -30,7 +30,10 @@ type IconName =
   | 'pencil'
   | 'delete'
   | 'bug'
-  | 'refresh';
+  | 'refresh'
+  | 'eye'
+  | 'download'
+  | 'bar-chart';
 
 const FEATHER_MAP: Record<IconName, string> = {
   camera:    'camera',
@@ -61,6 +64,9 @@ const FEATHER_MAP: Record<IconName, string> = {
   delete:    'trash-2',
   bug:       'terminal',
   refresh:   'refresh-cw',
+  eye:       'eye',
+  download:  'download',
+  'bar-chart': 'bar-chart',
 };
 
 interface IconProps {

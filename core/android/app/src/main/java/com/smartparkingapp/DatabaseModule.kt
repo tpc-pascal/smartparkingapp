@@ -1,6 +1,8 @@
 package com.smartparkingapp
 
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.database.Cursor
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -11,8 +13,9 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kotlinx.coroutines.*
 import java.util.concurrent.TimeUnit
+import java.io.File
 
-class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context) {
+class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaModule(context), ActivityEventListener {
 
     override fun getName() = "DatabaseModule"
 
@@ -22,16 +25,18 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
         reactApplicationContext.getSharedPreferences("session", Context.MODE_PRIVATE)
     }
 
+    companion object {
+        private const val SAVE_FILE_REQUEST_CODE = 1001
+    }
+
+    private var saveFilePending: Promise? = null
+    private var saveFilePath: String? = null
+
     init {
         SupabaseApi.setCacheDir(reactApplicationContext.cacheDir)
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-        val periodicSync = PeriodicWorkRequestBuilder<SyncWorker>(2, TimeUnit.MINUTES)
-            .setConstraints(constraints)
-            .build()
-        WorkManager.getInstance(reactApplicationContext)
-            .enqueueUniquePeriodicWork("sync_periodic", ExistingPeriodicWorkPolicy.KEEP, periodicSync)
+        reactApplicationContext.addActivityEventListener(this)
+        // Sync được kích hoạt event-driven (NetInfo reconnect + AppState foreground + boot),
+        // không cần periodic poll để tránh device wake.
     }
 
     override fun onCatalystInstanceDestroy() {
@@ -52,6 +57,88 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     private fun loadJwt(): String? = prefs.getString("jwt", null)
 
     private fun loadLocalId(): Long = prefs.getLong("id", -1L)
+
+    private fun persistImage(sourcePath: String?): String? {
+        if (sourcePath == null) return null
+        val cleanPath = sourcePath.removePrefix("file://")
+        val srcFile = File(cleanPath)
+        if (!srcFile.exists()) return null
+        val destDir = File(reactApplicationContext.filesDir, "plate_images")
+        destDir.mkdirs()
+        val destFile = File(destDir, "plate_${System.currentTimeMillis()}_${srcFile.name}")
+        return try {
+            srcFile.copyTo(destFile, overwrite = true)
+            LogBuffer.add("[DB] persistImage: $cleanPath → ${destFile.absolutePath}")
+            destFile.absolutePath
+        } catch (e: Exception) {
+            LogBuffer.add("[DB] persistImage failed: ${e.message}")
+            sourcePath
+        }
+    }
+
+    @ReactMethod
+    fun persistImage(sourcePath: String, promise: Promise) {
+        moduleScope.launch {
+            try {
+                val result = persistImage(sourcePath)
+                if (result != null) {
+                    promise.resolve("file://$result")
+                } else {
+                    promise.resolve(sourcePath)
+                }
+            } catch (e: Exception) {
+                promise.resolve(sourcePath)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun persistFrame(sourcePath: String, frameId: String, promise: Promise) {
+        moduleScope.launch {
+            try {
+                val cleanPath = sourcePath.removePrefix("file://")
+                val srcFile = File(cleanPath)
+                if (!srcFile.exists()) { promise.resolve(sourcePath); return@launch }
+                val destDir = File(reactApplicationContext.filesDir, "plate_images")
+                destDir.mkdirs()
+                val destFile = File(destDir, "frame_${frameId}.jpg")
+                srcFile.copyTo(destFile, overwrite = true)
+                promise.resolve("file://${destFile.absolutePath}")
+            } catch (e: Exception) {
+                promise.resolve(sourcePath)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun markFrameValid(frameId: String, plate: String, promise: Promise) {
+        moduleScope.launch {
+            try {
+                val dir = File(reactApplicationContext.filesDir, "plate_images")
+                val frameFile = File(dir, "frame_${frameId}.jpg")
+                if (!frameFile.exists()) { promise.resolve(null); return@launch }
+                val validFile = File(dir, "valid_${plate}_${System.currentTimeMillis()}.jpg")
+                frameFile.renameTo(validFile)
+                promise.resolve("file://${validFile.absolutePath}")
+            } catch (e: Exception) {
+                promise.resolve(null)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun clearFrame(frameId: String, promise: Promise) {
+        moduleScope.launch {
+            try {
+                val dir = File(reactApplicationContext.filesDir, "plate_images")
+                val frameFile = File(dir, "frame_${frameId}.jpg")
+                if (frameFile.exists()) frameFile.delete()
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.resolve(true)
+            }
+        }
+    }
 
     private fun enqueueSync() {
         val request = OneTimeWorkRequestBuilder<SyncWorker>()
@@ -93,8 +180,12 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     fun registerAttendant(email: String, password: String, promise: Promise) {
         moduleScope.launch {
             try {
-                // 1. Check Supabase FIRST — account may have been deleted remotely
-                //    while stale local record still exists
+                if (!isConnected()) {
+                    withContext(Dispatchers.Main) {
+                        promise.reject("NO_NETWORK", "Không có kết nối mạng. Vui lòng thử lại sau.")
+                    }
+                    return@launch
+                }
                 val api = SupabaseApi()
                 val auth = api.signUp(email, password)
                 if (auth == null) {
@@ -103,15 +194,9 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                     }
                     return@launch
                 }
-
-                // 2. SignUp succeeded → Supabase has no record of this email
-                //    Clean up any stale local record from a previously deleted account
                 if (db.isEmailTaken(email)) {
                     db.deleteAttendantByEmail(email)
-                    LogBuffer.add("[DB] registerAttendant: removed stale local record for $email")
                 }
-
-                // 3. Fresh registration
                 val passwordHash = DatabaseHelper.sha256(password)
                 val localId = db.insertAttendantFull(auth.uid, email, passwordHash, auth.jwt, auth.refreshToken)
                 LogBuffer.add("[DB] registerAttendant: $email -> localId=$localId uid=${auth.uid}")
@@ -120,9 +205,7 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                 val serverId = apiAuth.pushAttendant(auth.uid, email)
                 if (serverId != null) {
                     db.markAttendantSyncedWithServerId(localId, serverId)
-                    LogBuffer.add("[DB] Attendant pushed: serverId=$serverId")
                 } else {
-                    // pushAttendant failed (e.g. unique constraint, RLS) — rollback local insert
                     LogBuffer.add("[DB] pushAttendant failed — rolling back local insert")
                     db.deleteAttendantAndLogs(localId)
                     withContext(Dispatchers.Main) {
@@ -131,7 +214,6 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                     return@launch
                 }
                 saveSession(localId, email, auth.jwt)
-
                 val map = Arguments.createMap()
                 map.putDouble("id", localId.toDouble())
                 map.putString("fullName", email)
@@ -159,6 +241,32 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     fun loginAttendant(email: String, password: String, promise: Promise) {
         moduleScope.launch {
             try {
+                val local = db.getAttendantByEmail(email)
+                // Nếu offline → vào thẳng offline fallback
+                if (!isConnected()) {
+                    LogBuffer.add("[DB] Offline login attempt: $email")
+                    if (local == null) {
+                        withContext(Dispatchers.Main) { promise.reject("EMAIL_NOT_FOUND", "Email không tồn tại trong hệ thống") }
+                        return@launch
+                    }
+                    val inputHash = DatabaseHelper.sha256(password)
+                    if (inputHash != local.passwordHash) {
+                        withContext(Dispatchers.Main) { promise.reject("AUTH_FAILED", "Mật khẩu không đúng") }
+                        return@launch
+                    }
+                    val storedJwt = local.jwtToken ?: run {
+                        withContext(Dispatchers.Main) { promise.reject("AUTH_FAILED", "Vui lòng đăng nhập khi có kết nối mạng") }
+                        return@launch
+                    }
+                    LogBuffer.add("[DB] Offline login OK: $email")
+                    saveSession(local.id, local.email, storedJwt)
+                    val map = Arguments.createMap()
+                    map.putDouble("id", local.id.toDouble())
+                    map.putString("fullName", local.email)
+                    withContext(Dispatchers.Main) { promise.resolve(map) }
+                    return@launch
+                }
+
                 val api = SupabaseApi()
                 val auth = api.signIn(email, password)
                 if (auth != null) {
@@ -167,7 +275,11 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                     val remote = apiAuth.fetchMyAttendant(auth.uid)
                     val localId: Long
                     if (remote != null) {
-                        localId = db.upsertAttendantFromServer(remote.serverId!!, remote.uid, remote.email)
+                        val sid = remote.serverId ?: run {
+                            withContext(Dispatchers.Main) { promise.reject("DB_ERROR", "Dữ liệu nhân viên không hợp lệ từ máy chủ") }
+                            return@launch
+                        }
+                        localId = db.upsertAttendantFromServer(sid, remote.uid, remote.email)
                     } else {
                         localId = db.insertAttendant(auth.uid, email)
                         val serverId = apiAuth.pushAttendant(auth.uid, email)
@@ -188,52 +300,24 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                     return@launch
                 }
 
-                // Online login failed
-                val connected = isConnected()
-                val local = db.getAttendantByEmail(email)
-
-                if (connected && local == null) {
-                    withContext(Dispatchers.Main) { promise.reject("EMAIL_NOT_FOUND", "Email không tồn tại trong hệ thống") }
-                    return@launch
-                }
-                if (connected && local != null) {
-                    // Check if auth user was deleted remotely
-                    val uid = local.uid
-                    val jwt = local.jwtToken
-                    val authUserExists = if (uid.isNotBlank() && jwt != null) {
-                        SupabaseApi(jwt).fetchAuthUser()
-                    } else { true }
-                    if (!authUserExists) {
-                        LogBuffer.add("[DB] Login: $email has local record but auth user deleted — cleaning up")
-                        db.deleteAttendantAndLogs(local.id)
-                        withContext(Dispatchers.Main) { promise.reject("ACCOUNT_DELETED", "Tài khoản đã bị xoá khỏi máy chủ, vui lòng đăng ký lại") }
-                        return@launch
-                    }
-                    withContext(Dispatchers.Main) { promise.reject("AUTH_FAILED", "Mật khẩu không đúng") }
-                    return@launch
-                }
-
-                // Offline fallback (no network)
-                LogBuffer.add("[DB] Online login failed, trying offline...")
+                // Online login failed (connected == true)
                 if (local == null) {
                     withContext(Dispatchers.Main) { promise.reject("EMAIL_NOT_FOUND", "Email không tồn tại trong hệ thống") }
                     return@launch
                 }
-                val inputHash = DatabaseHelper.sha256(password)
-                if (inputHash != local.passwordHash) {
-                    withContext(Dispatchers.Main) { promise.reject("AUTH_FAILED", "Mật khẩu không đúng") }
+                // Check if auth user was deleted remotely
+                val uid = local.uid
+                val jwt = local.jwtToken
+                val authUserExists = if (uid.isNotBlank() && jwt != null) {
+                    SupabaseApi(jwt).fetchAuthUser()
+                } else { true }
+                if (!authUserExists) {
+                    LogBuffer.add("[DB] Login: $email has local record but auth user deleted — cleaning up")
+                    db.deleteAttendantAndLogs(local.id)
+                    withContext(Dispatchers.Main) { promise.reject("ACCOUNT_DELETED", "Tài khoản đã bị xoá khỏi máy chủ, vui lòng đăng ký lại") }
                     return@launch
                 }
-                val storedJwt = local.jwtToken ?: run {
-                    withContext(Dispatchers.Main) { promise.reject("AUTH_FAILED", "Vui lòng đăng nhập khi có kết nối mạng") }
-                    return@launch
-                }
-                LogBuffer.add("[DB] Offline login OK: $email")
-                saveSession(local.id, local.email, storedJwt)
-                val map = Arguments.createMap()
-                map.putDouble("id", local.id.toDouble())
-                map.putString("fullName", local.email)
-                withContext(Dispatchers.Main) { promise.resolve(map) }
+                withContext(Dispatchers.Main) { promise.reject("AUTH_FAILED", "Mật khẩu không đúng") }
             } catch (e: Exception) {
                 Log.e("DB", "login error", e)
                 withContext(Dispatchers.Main) { promise.reject("DB_ERROR", e.message ?: "Đã có lỗi xảy ra") }
@@ -263,16 +347,18 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     @ReactMethod
     fun logout(promise: Promise) {
         try {
-            val jwt = loadJwt()
-            if (jwt != null) {
-                SupabaseApi(jwt).signOut()
-            }
+            // Cleanup local trước
             val activeSession = db.getActiveSession()
             if (activeSession != null) {
                 db.endSession(activeSession.id)
                 LogBuffer.add("[DB] Active session ended on logout: ${activeSession.name}")
             }
             prefs.edit().clear().apply()
+            // Fire-and-forget signOut (không block)
+            val jwt = loadJwt()
+            if (jwt != null) {
+                try { SupabaseApi(jwt).signOut() } catch (_: Exception) {}
+            }
             promise.resolve(true)
         } catch (e: Exception) {
             promise.reject("DB_ERROR", e.message)
@@ -413,6 +499,27 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
         }
     }
 
+    @ReactMethod
+    fun getAllSessions(promise: Promise) {
+        try {
+            val localId = loadLocalId()
+            val sessions = if (localId == -1L) emptyList() else db.getAllSessionsForAttendant(localId)
+            val array = Arguments.createArray()
+            for (s in sessions) {
+                val map = Arguments.createMap()
+                map.putDouble("id", s.id.toDouble())
+                map.putString("name", s.name)
+                map.putString("status", s.status)
+                map.putString("createdAt", s.createdAt)
+                if (s.endedAt != null) map.putString("endedAt", s.endedAt)
+                array.pushMap(map)
+            }
+            promise.resolve(array)
+        } catch (e: Exception) {
+            promise.reject("DB_ERROR", e.message)
+        }
+    }
+
     // ── Entry / Exit ──
 
     @ReactMethod
@@ -446,63 +553,10 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
         moduleScope.launch {
             try {
                 val sid = sessionId.toLong()
-                // 1. Ghi DB trước với local path
-                val id = db.recordEntry(licensePlate, sid, timestamp, entryImage)
-                LogBuffer.add("[DB] Entry inserted local: $licensePlate -> id=$id sid=$sid")
-
-                // 2. Upload ảnh async (không block)
-                if (entryImage != null) {
-                    val sess = db.getSessionById(sid)
-                    val att = if (sess != null) db.getAttendantById(sess.attendantId) else null
-                    val uid = att?.uid ?: "unknown"
-                    val remotePath = "${uid}_${timestamp.replace(":", "-").replace("T", "_").substringBefore("Z")}_${licensePlate}.jpg"
-                    launch {
-                        val jwt = loadJwt()
-                        if (jwt != null) {
-                            val api = SupabaseApi(jwt)
-                            val uploaded = api.uploadImage(entryImage, remotePath)
-                            if (uploaded != null) {
-                                db.updateEntryImage(id, uploaded)
-                                LogBuffer.add("[DB] Entry image uploaded async: $uploaded")
-                            }
-                        }
-                    }
-                }
-
-                // 3. Push parking log lên server
-                val pushed = withJwtRefresh { jwt ->
-                    val api = SupabaseApi(jwt)
-                    var sess = db.getSessionById(sid)
-                    if (sess != null && sess.serverId == null) {
-                        // Nếu session chưa được đồng bộ, đồng bộ ngay lập tức để lấy serverId
-                        val att = if (sess.attendantId > 0) db.getAttendantById(sess.attendantId) else null
-                        val serverAttId = att?.serverId
-                        val sId = api.pushSession(sess.name, sess.createdAt, sess.status, serverAttId)
-                        if (sId != null) {
-                            db.markSessionSyncedWithServerId(sess.id, sId)
-                            sess = db.getSessionById(sid)
-                            LogBuffer.add("[DB] Session synced immediately: id=${sess?.id} serverId=$sId")
-                        }
-                    }
-                    val serverSessId = sess?.serverId
-                    if (serverSessId != null) {
-                        val log = ParkingLog(
-                            id = id, licensePlate = licensePlate, timeIn = timestamp,
-                            sessionId = serverSessId, entryImage = entryImage
-                        )
-                        api.pushParkingLog(log)
-                    } else {
-                        LogBuffer.add("[DB] Cannot push parking log immediately because session server id is null")
-                        null
-                    }
-                }
-                if (pushed != null) {
-                    db.markParkingLogSyncedWithServerId(id, pushed)
-                    LogBuffer.add("[DB] Entry pushed OK: $licensePlate -> serverId=$pushed")
-                } else {
-                    LogBuffer.add("[DB] pushParkingLog failed, enqueue sync")
-                    enqueueSync()
-                }
+                val persistentPath = persistImage(entryImage)
+                val id = db.recordEntry(licensePlate, sid, timestamp, persistentPath)
+                LogBuffer.add("[DB] Entry inserted local: $licensePlate -> id=$id")
+                enqueueSync()
                 val map = Arguments.createMap()
                 map.putDouble("id", id.toDouble())
                 withContext(Dispatchers.Main) { promise.resolve(map) }
@@ -532,59 +586,42 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     fun recordExitFull(licensePlate: String, exitImage: String?, promise: Promise) {
         moduleScope.launch {
             try {
-                // 1. Ghi DB trước với local path
-                val rows = db.recordExit(licensePlate, exitImage)
+                val persistentPath = persistImage(exitImage)
+                val rows = db.recordExit(licensePlate, persistentPath)
                 LogBuffer.add("[DB] Exit local: $licensePlate rows=$rows")
                 if (rows == 0) {
                     withContext(Dispatchers.Main) { promise.reject("NOT_FOUND", "No active entry found for this plate") }
                     return@launch
                 }
-
-                // 2. Upload ảnh async (không block)
-                if (exitImage != null) {
-                    val localId = loadLocalId()
-                    if (localId != -1L) {
-                        val att = db.getAttendantById(localId)
-                        val uid = att?.uid ?: "unknown"
-                        val remotePath = "${uid}_exit_${DatabaseHelper.formatNow().replace(":", "-").replace("T", "_").substringBefore("Z")}_${licensePlate}.jpg"
-                        launch {
-                            val jwt = loadJwt()
-                            if (jwt != null) {
-                                val api = SupabaseApi(jwt)
-                                val uploaded = api.uploadImage(exitImage, remotePath)
-                                if (uploaded != null) {
-                                    val log = db.getUnsyncedParkingLogByPlate(licensePlate)
-                                    if (log != null) db.updateExitImage(log.id, uploaded)
-                                    LogBuffer.add("[DB] Exit image uploaded async: $uploaded")
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 3. Update server
-                val log = db.getUnsyncedParkingLogByPlate(licensePlate)
-                if (log != null && log.serverId != null) {
-                    val ok = withJwtRefresh { jwt ->
-                        val api = SupabaseApi(jwt)
-                        api.updateParkingLog(log.serverId, log.timeOut ?: DatabaseHelper.formatNow(), exitImage, log.fee)
-                    }
-                    if (ok == true) {
-                        db.markParkingLogSyncedWithServerId(log.id, log.serverId)
-                        LogBuffer.add("[DB] Exit pushed (UPDATE): $licensePlate")
-                    } else {
-                        LogBuffer.add("[DB] updateParkingLog failed, enqueue sync")
-                        enqueueSync()
-                    }
-                } else {
-                    LogBuffer.add("[DB] Exit no serverId (${log?.serverId}), enqueue sync")
-                    enqueueSync()
-                }
+                enqueueSync()
                 withContext(Dispatchers.Main) { promise.resolve(rows) }
             } catch (e: Exception) {
                 LogBuffer.add("[DB] recordExitFull error: ${e.message}")
                 withContext(Dispatchers.Main) { promise.reject("DB_ERROR", e.message) }
             }
+        }
+    }
+
+    @ReactMethod
+    fun getParkingLogsBySession(sessionId: Double, promise: Promise) {
+        try {
+            val logs = db.getParkingLogsBySession(sessionId.toLong())
+            val array = Arguments.createArray()
+            for (log in logs) {
+                val map = Arguments.createMap()
+                map.putDouble("id", log.id.toDouble())
+                map.putString("licensePlate", log.licensePlate)
+                map.putString("timeIn", log.timeIn)
+                if (log.timeOut != null) map.putString("timeOut", log.timeOut)
+                map.putDouble("sessionId", log.sessionId.toDouble())
+                if (log.entryImage != null) map.putString("entryImage", log.entryImage)
+                if (log.exitImage != null) map.putString("exitImage", log.exitImage)
+                map.putInt("fee", log.fee)
+                array.pushMap(map)
+            }
+            promise.resolve(array)
+        } catch (e: Exception) {
+            promise.reject("DB_ERROR", e.message)
         }
     }
 
@@ -611,9 +648,9 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     @ReactMethod
-    fun getTodayStats(promise: Promise) {
+    fun getTodayStats(sessionId: Double?, promise: Promise) {
         try {
-            val stats = db.getTodayStats()
+            val stats = db.getTodayStats(sessionId?.toLong())
             val map = Arguments.createMap()
             map.putInt("entryCount", stats.entryCount)
             map.putInt("exitCount", stats.exitCount)
@@ -625,11 +662,13 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
     }
 
     @ReactMethod
-    fun searchParkingLogs(query: String?, onlyParked: String?, offset: Double, limit: Double, promise: Promise) {
+    fun searchParkingLogs(query: String?, onlyParked: String?, onlyExited: String?, sessionId: Double?, offset: Double, limit: Double, promise: Promise) {
         try {
             val logs = db.searchParkingLogs(
                 query = query,
                 onlyParked = onlyParked == "true",
+                onlyExited = onlyExited == "true",
+                sessionId = if (sessionId != null && sessionId > 0) sessionId.toLong() else null,
                 offset = offset.toInt(),
                 limit = limit.toInt()
             )
@@ -694,6 +733,12 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
                 if (localId == -1L) { withContext(Dispatchers.Main) { promise.resolve(false) }; return@launch }
                 val att = db.getAttendantById(localId)
                 if (att == null) { withContext(Dispatchers.Main) { promise.resolve(false) }; return@launch }
+                // Nếu offline → trust local session, không verify
+                if (!isConnected()) {
+                    LogBuffer.add("[DB] verifySession: offline — trusting local session")
+                    withContext(Dispatchers.Main) { promise.resolve(true) }
+                    return@launch
+                }
                 val jwt = att.jwtToken ?: run { withContext(Dispatchers.Main) { promise.resolve(false) }; return@launch }
                 val uid = att.uid
                 if (uid.isBlank()) { withContext(Dispatchers.Main) { promise.resolve(false) }; return@launch }
@@ -809,14 +854,30 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
         }
     }
 
+    @ReactMethod
+    fun triggerFullSync(promise: Promise) {
+        try {
+            val prefs = reactApplicationContext.getSharedPreferences("sync", Context.MODE_PRIVATE)
+            prefs.edit().remove("last_sync_timestamp").apply()
+            val workRequest = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+            WorkManager.getInstance(reactApplicationContext)
+                .enqueueUniqueWork("sync_now", ExistingWorkPolicy.REPLACE, workRequest)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("DB_ERROR", e.message)
+        }
+    }
+
     // ── Debug SQL ──
 
     @ReactMethod
     fun executeSql(sql: String, promise: Promise) {
-        if (!BuildConfig.DEBUG) {
-            promise.reject("FORBIDDEN", "executeSql is only available in debug builds")
-            return
-        }
         try {
             val rdb = db.readableDatabase
             val cursor = rdb.rawQuery(sql, null)
@@ -938,6 +999,60 @@ class DatabaseModule(context: ReactApplicationContext) : ReactContextBaseJavaMod
             }
         }
     }
+
+    @ReactMethod
+    fun saveFile(srcPath: String, mimeType: String, defaultName: String, promise: Promise) {
+        val activity = reactApplicationContext.currentActivity
+        if (activity == null) {
+            promise.reject("NO_ACTIVITY", "Không tìm thấy Activity")
+            return
+        }
+        val srcFile = File(srcPath)
+        if (!srcFile.exists()) {
+            promise.reject("FILE_NOT_FOUND", "File nguồn không tồn tại")
+            return
+        }
+        saveFilePending = promise
+        saveFilePath = srcPath
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType
+            putExtra(Intent.EXTRA_TITLE, defaultName)
+        }
+        activity.startActivityForResult(intent, SAVE_FILE_REQUEST_CODE, null)
+    }
+
+    override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != SAVE_FILE_REQUEST_CODE) return
+
+        val promise = saveFilePending
+        saveFilePending = null
+        val srcPath = saveFilePath
+        saveFilePath = null
+
+        if (resultCode != Activity.RESULT_OK || data?.data == null) {
+            promise?.reject("CANCELLED", "Đã huỷ chọn vị trí lưu")
+            return
+        }
+
+        moduleScope.launch {
+            try {
+                val uri = data.data!!
+                reactApplicationContext.contentResolver.openOutputStream(uri)?.use { output ->
+                    File(srcPath!!).inputStream().use { input ->
+                        input.copyTo(output)
+                    }
+                }
+                File(srcPath!!).delete()
+                withContext(Dispatchers.Main) { promise?.resolve(true) }
+            } catch (e: Exception) {
+                LogBuffer.add("[DB] saveFile error: ${e.message}")
+                withContext(Dispatchers.Main) { promise?.reject("SAVE_FAILED", e.message ?: "Lỗi khi lưu file") }
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {}
 
     @ReactMethod
     fun addListener(eventName: String) {}

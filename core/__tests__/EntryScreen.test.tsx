@@ -3,6 +3,7 @@ import { render, act } from '@testing-library/react-native';
 import EntryScreen from '../src/screens/EntryScreen';
 
 jest.mock('../src/utils/databaseHelper', () => ({
+  getSettingBool: jest.fn(),
   notifySuccess: jest.fn(),
 }));
 

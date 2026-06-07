@@ -3,6 +3,7 @@ package com.smartparkingapp
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import java.io.File
 
 class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
 
@@ -83,13 +84,23 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
                 continue
             }
             val logToPush = log.copy(sessionId = serverSessId)
-            var serverId = api.pushParkingLog(logToPush)
-            if (serverId == null && !jwtRefreshed) {
-                val newJwt = refreshJwt(applicationContext, db, prefs)
-                if (newJwt != null) {
-                    jwtRefreshed = true
-                    api = SupabaseApi(newJwt)
-                    serverId = api.pushParkingLog(logToPush)
+            // Nếu log đã có serverId → PATCH, nếu chưa → POST
+            var serverId: Long? = null
+            if (log.serverId != null) {
+                val patched = api.updateParkingLogByServerId(log.serverId, logToPush)
+                if (patched) {
+                    serverId = log.serverId
+                }
+            }
+            if (serverId == null) {
+                serverId = api.pushParkingLog(logToPush)
+                if (serverId == null && !jwtRefreshed) {
+                    val newJwt = refreshJwt(applicationContext, db, prefs)
+                    if (newJwt != null) {
+                        jwtRefreshed = true
+                        api = SupabaseApi(newJwt)
+                        serverId = api.pushParkingLog(logToPush)
+                    }
                 }
             }
             if (serverId != null) {
@@ -125,45 +136,54 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
         val pendingLogs = db.getParkingLogsWithPendingImages()
         if (pendingLogs.isNotEmpty()) {
             LogBuffer.add("[SYNC] Uploading ${pendingLogs.size} pending images")
-            val localId = prefs.getLong("id", -1L)
-            val att = if (localId != -1L) db.getAttendantById(localId) else null
-            val uid = att?.uid ?: "unknown"
             for (log in pendingLogs) {
                 if (log.entryImage != null && !log.entryImage.startsWith("http")) {
-                    val ts = log.timeIn.replace(":", "-").replace("T", "_").substringBefore("Z")
-                    val remotePath = "${uid}_${ts}_${log.licensePlate}_sync_${log.id}.jpg"
-                    val publicUrl = api.uploadImage(log.entryImage, remotePath)
-                    if (publicUrl != null) {
-                        db.updateEntryImage(log.id, publicUrl)
-                        if (log.serverId != null) {
-                            api.updateParkingLogImage(log.serverId, publicUrl, null)
-                        }
-                        LogBuffer.add("[SYNC] Entry image uploaded for log ${log.id}: $publicUrl")
+                    val file = File(log.entryImage.removePrefix("file://"))
+                    if (!file.exists()) {
+                        LogBuffer.add("[SYNC] Entry image file not found for log ${log.id}, skipping")
                     } else {
-                        hasFailure = true
+                        val plateFolder = log.licensePlate.replace(Regex("[^A-Z0-9]"), "")
+                        val remotePath = "${plateFolder}/${log.id}_entry.jpg"
+                        val publicUrl = api.uploadImage(log.entryImage, remotePath)
+                        if (publicUrl != null) {
+                            db.updateEntryImage(log.id, publicUrl)
+                            if (log.serverId != null) {
+                                api.updateParkingLogImage(log.serverId, publicUrl, null)
+                            }
+                            LogBuffer.add("[SYNC] Entry image uploaded for log ${log.id}: $publicUrl")
+                        } else {
+                            hasFailure = true
+                        }
                     }
                 }
                 if (log.exitImage != null && !log.exitImage.startsWith("http")) {
-                    val ts = (log.timeOut ?: DatabaseHelper.formatNow()).replace(":", "-").replace("T", "_").substringBefore("Z")
-                    val remotePath = "${uid}_exit_${ts}_${log.licensePlate}_sync_${log.id}.jpg"
-                    val publicUrl = api.uploadImage(log.exitImage, remotePath)
-                    if (publicUrl != null) {
-                        db.updateExitImage(log.id, publicUrl)
-                        if (log.serverId != null) {
-                            api.updateParkingLogImage(log.serverId, null, publicUrl)
-                        }
-                        LogBuffer.add("[SYNC] Exit image uploaded for log ${log.id}: $publicUrl")
+                    val file = File(log.exitImage.removePrefix("file://"))
+                    if (!file.exists()) {
+                        LogBuffer.add("[SYNC] Exit image file not found for log ${log.id}, skipping")
                     } else {
-                        hasFailure = true
+                        val plateFolder = log.licensePlate.replace(Regex("[^A-Z0-9]"), "")
+                        val remotePath = "${plateFolder}/${log.id}_exit.jpg"
+                        val publicUrl = api.uploadImage(log.exitImage, remotePath)
+                        if (publicUrl != null) {
+                            db.updateExitImage(log.id, publicUrl)
+                            if (log.serverId != null) {
+                                api.updateParkingLogImage(log.serverId, null, publicUrl)
+                            }
+                            LogBuffer.add("[SYNC] Exit image uploaded for log ${log.id}: $publicUrl")
+                        } else {
+                            hasFailure = true
+                        }
                     }
                 }
             }
         }
 
-        // Update last sync timestamp
-        val now = DatabaseHelper.formatNow()
-        syncPrefs.edit().putString("last_sync_timestamp", now).apply()
-        LogBuffer.add("[SYNC] Updated last sync: $now")
+        // Update last sync timestamp — chỉ ghi khi không có lỗi
+        if (!hasFailure) {
+            val now = DatabaseHelper.formatNow()
+            syncPrefs.edit().putString("last_sync_timestamp", now).apply()
+            LogBuffer.add("[SYNC] Updated last sync: $now")
+        }
 
         LogBuffer.add("[SYNC] SyncWorker finished, hasFailure=$hasFailure")
         return if (hasFailure) Result.retry() else Result.success()

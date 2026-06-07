@@ -17,15 +17,38 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../context/AuthContext';
 import Icon, { AvatarCircle } from '../theme/Icon';
-import { getTodayStats, getCurrentlyParked, isOnline, getRemainingCount, TodayStats, ParkingLogResult } from '../utils/databaseHelper';
+import { getTodayStats, getRemainingCount, getSettingInt, searchParkingLogs, getParkingLogsBySession, TodayStats, ParkingLogResult, SessionInfo } from '../utils/databaseHelper';
 import { useSession } from '../context/SessionContext';
+import { exportSessionToXlsx } from '../utils/exportHelper';
 
 type StatKey = 'entryCount' | 'exitCount' | 'parkedCount';
 
+function calculateFee(timeIn: string, timeOut: string | undefined, ratePerHour: number = 10000): number {
+  if (!timeOut) return 0;
+  const inTime = new Date(timeIn).getTime();
+  const outTime = new Date(timeOut).getTime();
+  if (isNaN(inTime) || isNaN(outTime)) return 0;
+  const diffMs = outTime - inTime;
+  if (diffMs <= 0) return ratePerHour;
+  const hours = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60)));
+  return hours * ratePerHour;
+}
+
+function getParkedHours(timeIn: string, timeOut: string): number {
+  const inTime = new Date(timeIn).getTime();
+  const outTime = new Date(timeOut).getTime();
+  if (isNaN(inTime) || isNaN(outTime)) return 0;
+  const diffMs = outTime - inTime;
+  if (diffMs <= 0) return 1;
+  return Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60)));
+}
+
+function formatFee(fee: number): string {
+  return fee.toLocaleString('vi-VN') + '₫';
+}
+
 const STAT_ITEMS: { key: StatKey; label: string }[] = [
   { key: 'parkedCount', label: 'Trong bãi' },
-  { key: 'entryCount', label: 'Xe vào' },
-  { key: 'exitCount', label: 'Xe ra' },
 ];
 
 const formatImageUri = (uri: string | null | undefined): string | undefined => {
@@ -43,48 +66,48 @@ function HomeScreen() {
   const { session, createNewSession, endCurrentSession, refresh: refreshSession } = useSession();
   const [stats, setStats] = useState<TodayStats>({ entryCount: 0, exitCount: 0, parkedCount: 0 });
   const [parked, setParked] = useState<ParkingLogResult[]>([]);
-  const [online, setOnline] = useState(false);
   const [sessionModalVisible, setSessionModalVisible] = useState(false);
   const [sessionName, setSessionName] = useState('');
   const sessionInputRef = useRef<TextInput>(null);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
+  const [detailLog, setDetailLog] = useState<ParkingLogResult | null>(null);
+  const [detailFeeRate, setDetailFeeRate] = useState(10000);
 
   const refresh = useCallback(async () => {
     try {
-      const [s, p, net] = await Promise.all([getTodayStats(), getCurrentlyParked(), isOnline()]);
-      setStats(s);
-      setParked(p);
-      setOnline(net);
+      if (session) {
+        const [s, p] = await Promise.all([getTodayStats(session.id), searchParkingLogs('', true, false, session.id, 0, 200)]);
+        setStats(s);
+        setParked(p);
+      } else {
+        setStats({ entryCount: 0, exitCount: 0, parkedCount: 0 });
+        setParked([]);
+      }
     } catch {}
-  }, []);
+  }, [session]);
 
-  useEffect(() => { refresh(); }, []);
-
-  useEffect(() => {
-    const interval = setInterval(async () => { try { setOnline(await isOnline()); } catch {} }, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
 
   const handleEndSession = useCallback(() => {
     if (!session) return;
     (async () => {
       try {
         const count = await getRemainingCount(session.id);
-        if (count > 0) {
-          Alert.alert(
-            'Còn xe chưa ra',
-            `Còn ${count} xe của "${session.name}" chưa ra. Bạn có chắc muốn kết thúc phiên?`,
-            [
-              { text: 'Huỷ', style: 'cancel' },
-              { text: 'Kết thúc', style: 'destructive', onPress: async () => { await endCurrentSession(); } },
-            ]
-          );
-        } else {
-          Alert.alert('Kết thúc phiên', 'Xác nhận kết thúc phiên?', [
-            { text: 'Huỷ', style: 'cancel' },
-            { text: 'Kết thúc', style: 'destructive', onPress: async () => { await endCurrentSession(); } },
-          ]);
-        }
+        const msg = count > 0
+          ? `Còn ${count} xe của "${session.name}" chưa ra. Bạn có muốn xuất file thống kê trước khi kết thúc?`
+          : `Xác nhận kết thúc phiên "${session.name}"? Bạn có muốn xuất file thống kê trước khi kết thúc?`;
+        Alert.alert('Kết thúc phiên', msg, [
+          { text: 'Huỷ', style: 'cancel' },
+          { text: 'Chỉ kết thúc', style: 'destructive', onPress: async () => { await endCurrentSession(); } },
+          { text: 'Xuất file & kết thúc', onPress: async () => {
+            try {
+              const rate = await getSettingInt('fee_per_hour') ?? 10000;
+              const logs = await getParkingLogsBySession(session.id);
+              await exportSessionToXlsx(session, logs, rate);
+            } catch {}
+            await endCurrentSession();
+          }},
+        ]);
       } catch {}
     })();
   }, [session, endCurrentSession]);
@@ -92,9 +115,12 @@ function HomeScreen() {
   const handleLogout = useCallback(() => {
     Alert.alert('Xác nhận', 'Bạn có chắc muốn đăng xuất?', [
       { text: 'Hủy', style: 'cancel' },
-      { text: 'Đăng xuất', style: 'destructive', onPress: () => logout() },
+      { text: 'Đăng xuất', style: 'destructive', onPress: async () => {
+        await logout();
+        navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+      }},
     ]);
-  }, [logout]);
+  }, [logout, navigation]);
 
   const handleCreateSession = useCallback(async (name: string) => {
     try {
@@ -105,6 +131,45 @@ function HomeScreen() {
       Alert.alert('Lỗi', `Không thể tạo phiên:\n${e instanceof Error ? e.message : 'Lỗi không xác định'}`);
     }
   }, [createNewSession, refreshSession, refresh]);
+
+  const goToSettings = useCallback(() => navigation.navigate('Settings'), [navigation]);
+  const goToEntry = useCallback(() => navigation.navigate('Entry'), [navigation]);
+  const goToExit = useCallback(() => navigation.navigate('Exit'), [navigation]);
+  const goToHistory = useCallback(() => navigation.navigate('History'), [navigation]);
+
+  const handleDetailPress = useCallback(async (item: ParkingLogResult) => {
+    const rate = await getSettingInt('fee_per_hour') ?? 10000;
+    setDetailFeeRate(rate);
+    setDetailLog(item);
+  }, []);
+
+  const renderItem = useCallback(({ item }: { item: ParkingLogResult }) => {
+    const isParked = !item.timeOut;
+    return (
+      <TouchableOpacity
+        style={[styles.parkedCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.parkedLeft, { backgroundColor: isParked ? colors.successLight : colors.surface }]}>
+          <View style={[styles.parkedDot, { backgroundColor: isParked ? colors.success : colors.textMuted }]} />
+        </View>
+        <View style={styles.parkedBody}>
+          <Text style={[styles.parkedPlate, { color: colors.text }]}>{item.licensePlate}</Text>
+          <Text style={[styles.parkedTime, { color: colors.textSecondary }]}>Vào: {new Date(item.timeIn).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</Text>
+          {item.timeOut ? (
+            <Text style={[styles.parkedTime, { color: colors.textSecondary }]}>Ra: {new Date(item.timeOut).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</Text>
+          ) : (
+            <View style={[styles.badge, { backgroundColor: colors.successLight, alignSelf: 'flex-start', marginTop: 2 }]}>
+              <Text style={[styles.badgeText, { color: colors.success }]}>Trong bãi</Text>
+            </View>
+          )}
+        </View>
+        <TouchableOpacity style={styles.eyeBtn} onPress={() => handleDetailPress(item)} activeOpacity={0.7}>
+          <Icon name="eye" size={20} color={colors.primary} />
+        </TouchableOpacity>
+      </TouchableOpacity>
+    );
+  }, [colors, handleDetailPress]);
 
   const displayName = attendantName.split('@')[0];
 
@@ -121,11 +186,10 @@ function HomeScreen() {
           </View>
         </View>
         <View style={styles.rightBar}>
-          <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('Settings')}>
+          <TouchableOpacity onPress={goToSettings}>
             <Icon name="settings" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
-          <Icon name="wifi" size={18} color={online ? colors.success : colors.danger} />
-          <TouchableOpacity style={[styles.logoutBtn, { backgroundColor: colors.dangerLight, borderColor: colors.danger }]} onPress={handleLogout}>
+          <TouchableOpacity onPress={handleLogout}>
             <Icon name="logout" size={14} color={colors.danger} />
           </TouchableOpacity>
         </View>
@@ -144,19 +208,19 @@ function HomeScreen() {
           </View>
 
           <View style={styles.actionsRow}>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('Entry')} activeOpacity={0.7}>
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={goToEntry} activeOpacity={0.7}>
               <View style={styles.actionIconWrap}>
                 <Icon name="entry" size={36} color={colors.primary} />
               </View>
               <Text style={[styles.actionLabel, { color: colors.text }]}>Quét xe vào</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('Exit')} activeOpacity={0.7}>
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={goToExit} activeOpacity={0.7}>
               <View style={styles.actionIconWrap}>
                 <Icon name="exit" size={36} color={colors.accent} />
               </View>
               <Text style={[styles.actionLabel, { color: colors.text }]}>Quét xe ra</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => navigation.navigate('History')} activeOpacity={0.7}>
+            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={goToHistory} activeOpacity={0.7}>
               <View style={styles.actionIconWrap}>
                 <Icon name="history" size={36} color={colors.success} />
               </View>
@@ -164,7 +228,7 @@ function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Xe đang trong bãi</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Danh sách xe</Text>
 
           <View style={styles.statsRow}>
             {STAT_ITEMS.map(({ key, label }) => (
@@ -179,25 +243,8 @@ function HomeScreen() {
             data={parked}
             keyExtractor={item => item.id.toString()}
             contentContainerStyle={parked.length === 0 ? styles.emptyList : styles.list}
-            ListEmptyComponent={<Text style={[styles.emptyText, { color: colors.textMuted }]}>Không có xe nào trong bãi</Text>}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[styles.parkedCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}
-                onPress={() => item.entryImage ? setExpandedImage(formatImageUri(item.entryImage) || null) : null}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.parkedLeft, { backgroundColor: colors.successLight }]}>
-                  <View style={[styles.parkedDot, { backgroundColor: colors.success }]} />
-                </View>
-                <View style={styles.parkedBody}>
-                  <Text style={[styles.parkedPlate, { color: colors.text }]}>{item.licensePlate}</Text>
-                  <Text style={[styles.parkedTime, { color: colors.textSecondary }]}>Vào lúc: {new Date(item.timeIn).toLocaleTimeString('vi-VN')}</Text>
-                </View>
-                {item.entryImage ? (
-                  <Image source={{ uri: formatImageUri(item.entryImage) }} style={styles.parkedImage} />
-                ) : null}
-              </TouchableOpacity>
-            )}
+            ListEmptyComponent={<Text style={[styles.emptyText, { color: colors.textMuted }]}>Chưa có xe nào trong phiên này</Text>}
+            renderItem={renderItem}
           />
         </>
       ) : (
@@ -205,6 +252,10 @@ function HomeScreen() {
           <TouchableOpacity style={[styles.createSessionBtn, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]} onPress={() => { setSessionName(''); setSessionModalVisible(true); }} activeOpacity={0.7}>
             <Icon name="parking" size={18} color={colors.primary} />
             <Text style={[styles.createSessionText, { color: colors.primary }]}>Tạo phiên</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.historyBtn, { borderColor: colors.border }]} onPress={goToHistory} activeOpacity={0.7}>
+            <Icon name="history" size={18} color={colors.textSecondary} />
+            <Text style={[styles.historyBtnText, { color: colors.textSecondary }]}>Lịch sử</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -237,6 +288,70 @@ function HomeScreen() {
         </View>
       </Modal>
 
+      <Modal visible={detailLog != null} transparent animationType="fade" onRequestClose={() => setDetailLog(null)}>
+        {detailLog && (
+          <View style={styles.detailOverlay}>
+            <View style={[styles.detailCard, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+              <Text style={[styles.detailTitle, { color: colors.text }]}>Chi tiết xe</Text>
+
+              <TouchableOpacity onPress={() => detailLog.entryImage ? setExpandedImage(formatImageUri(detailLog.entryImage) || null) : null} activeOpacity={0.7}>
+                {detailLog.entryImage ? (
+                  <Image source={{ uri: formatImageUri(detailLog.entryImage) }} style={styles.detailThumb} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.detailThumbPlaceholder, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.detailThumbText, { color: colors.textMuted }]}>📷 Không có ảnh vào</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={() => detailLog.exitImage ? setExpandedImage(formatImageUri(detailLog.exitImage) || null) : null} activeOpacity={0.7}>
+                {detailLog.exitImage ? (
+                  <Image source={{ uri: formatImageUri(detailLog.exitImage) }} style={styles.detailThumb} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.detailThumbPlaceholder, { backgroundColor: colors.surface }]}>
+                    <Text style={[styles.detailThumbText, { color: colors.textMuted }]}>📷 Không có ảnh ra</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              <View style={[styles.detailDivider, { backgroundColor: colors.borderLight }]} />
+
+              <View style={styles.detailRow}>
+                <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Biển số</Text>
+                <Text style={[styles.detailValue, { color: colors.text }]}>{detailLog.licensePlate}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Thời gian vào</Text>
+                <Text style={[styles.detailValue, { color: colors.text }]}>{new Date(detailLog.timeIn).toLocaleString('vi-VN')}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Thời gian ra</Text>
+                <Text style={[styles.detailValue, { color: colors.text }]}>
+                  {detailLog.timeOut ? new Date(detailLog.timeOut).toLocaleString('vi-VN') : 'Chưa ra'}
+                </Text>
+              </View>
+              {detailLog.timeOut && (
+                <View style={styles.detailRow}>
+                  <Text style={[styles.detailLabel, { color: colors.textMuted }]}>Tổng phí</Text>
+                  <Text style={[styles.detailValue, { color: colors.warning, fontWeight: '700' }]}>
+                    {formatFee(calculateFee(detailLog.timeIn, detailLog.timeOut, detailFeeRate))}
+                  </Text>
+                </View>
+              )}
+              {detailLog.timeOut && (
+                <Text style={[styles.detailFeeBreakdown, { color: colors.textMuted }]}>
+                  ({getParkedHours(detailLog.timeIn, detailLog.timeOut)}h × {formatFee(detailFeeRate)})
+                </Text>
+              )}
+
+              <TouchableOpacity style={[styles.detailCloseBtn, { backgroundColor: colors.surface, borderColor: colors.border }]} onPress={() => setDetailLog(null)} activeOpacity={0.7}>
+                <Text style={[styles.detailCloseText, { color: colors.text }]}>Đóng</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </Modal>
+
       <Modal visible={!!expandedImage} transparent animationType="fade">
         <TouchableOpacity style={styles.imageModalOverlay} onPress={() => setExpandedImage(null)} activeOpacity={1}>
           {expandedImage && (
@@ -265,22 +380,6 @@ const styles = StyleSheet.create({
   greeting: { fontSize: 13 },
   userName: { fontSize: 18, fontWeight: '700' },
   rightBar: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoutBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   statsRow: {
     flexDirection: 'row',
     gap: 10,
@@ -352,6 +451,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   createSessionText: { fontSize: 14, fontWeight: '700' },
+  historyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 20,
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
+  },
+  historyBtnText: { fontSize: 14, fontWeight: '600' },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',
@@ -395,6 +506,28 @@ const styles = StyleSheet.create({
   modalBtn: { borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10, borderWidth: 1 },
   modalBtnPrimary: {},
   modalBtnText: { fontSize: 15, fontWeight: '600' },
+  badge: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2, marginTop: 4 },
+  badgeText: { fontSize: 11, fontWeight: '600' },
+  eyeBtn: { padding: 8, marginLeft: 8 },
+  detailOverlay: {
+    flex: 1, justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)', padding: 20,
+  },
+  detailCard: {
+    width: '100%', borderRadius: 16, padding: 20,
+    borderWidth: 1, gap: 12,
+  },
+  detailTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center', marginBottom: 4 },
+  detailThumb: { width: '100%', height: 140, borderRadius: 10 },
+  detailThumbPlaceholder: { width: '100%', height: 60, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  detailThumbText: { fontSize: 13 },
+  detailDivider: { height: 1, marginVertical: 4 },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  detailLabel: { fontSize: 14 },
+  detailValue: { fontSize: 14, fontWeight: '600' },
+  detailFeeBreakdown: { fontSize: 12, textAlign: 'right', marginTop: -8 },
+  detailCloseBtn: { paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 1, marginTop: 4 },
+  detailCloseText: { fontSize: 16, fontWeight: '600' },
 });
 
 export default HomeScreen;

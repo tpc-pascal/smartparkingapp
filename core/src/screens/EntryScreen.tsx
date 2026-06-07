@@ -8,6 +8,7 @@ import {
   StatusBar,
   Alert,
   Animated,
+  NativeModules,
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
@@ -19,7 +20,7 @@ import { recognizePlate, isValidVietnamPlate, plateToBoxes } from '../utils/plat
 import { getSettingBool, notifySuccess } from '../utils/databaseHelper';
 import type { Box } from '../components/CameraView';
 
-const SNAP_INTERVAL = 0;
+const SNAP_INTERVAL = 200;
 
 function EntryScreen() {
   const { colors } = useTheme();
@@ -32,6 +33,7 @@ function EntryScreen() {
   const dismissedPlatesRef = useRef(new Set<string>());
   const pendingPlateRef = useRef<string | null>(null);
   const showCharBboxesRef = useRef(false);
+  const frameCounterRef = useRef(0);
 
   useEffect(() => {
     (async () => {
@@ -150,6 +152,9 @@ function EntryScreen() {
           setPendingNewPlate(detected);
           setShowUpdatePopup(true);
         }
+      } else {
+        setPlateText('');
+        setStateBoxes([]);
       }
       return;
     }
@@ -175,11 +180,30 @@ function EntryScreen() {
     try {
       const snapPath: string | null = await cameraRef.current.takeSnapshot();
       if (!snapPath || !mountedRef.current || currentGen !== generationRef.current) return;
+      frameCounterRef.current += 1;
+      const frameId = `${Date.now()}_${currentGen}_${frameCounterRef.current}`;
+      // Persist frame (unique name) trước khi LPR pipeline xoá file temp
+      let framePath = snapPath;
+      try {
+        const fp = await NativeModules.DatabaseModule.persistFrame(snapPath, frameId);
+        if (fp) framePath = fp;
+      } catch {}
       const result = await recognizePlate(snapPath);
       if (!mountedRef.current || currentGen !== generationRef.current) return;
       const plates = result.plate && result.plate !== 'unknown' ? result.plate : '';
       const boxes = plateToBoxes(result, showCharBboxesRef.current) as Box[];
-      processResult(plates, boxes, snapPath);
+      if (plates) {
+        // Mark frame valid → rename thành valid_{plate}_{ts}.jpg (unique, không bị overwrite)
+        try {
+          const validPath = await NativeModules.DatabaseModule.markFrameValid(frameId, plates);
+          processResult(plates, boxes, validPath || framePath);
+        } catch {
+          processResult(plates, boxes, framePath);
+        }
+      } else {
+        NativeModules.DatabaseModule.clearFrame(frameId).catch(() => {});
+        processResult(plates, boxes);
+      }
     } catch {
     } finally {
       processingRef.current = false;
@@ -349,8 +373,6 @@ const styles = StyleSheet.create({
   camera: { flex: 1 },
   backBtnOverlay: {
     position: 'absolute', top: 16, left: 16,
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center', alignItems: 'center',
     zIndex: 10,
   },

@@ -26,7 +26,7 @@ export function captureConsole() {
 
 function pushLog(level: LogEntry['level'], args: unknown[]) {
   const message = args
-    .map(a => (typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)))
+    .map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a)))
     .join(' ');
   logs.push({ level, message, timestamp: new Date().toISOString() });
   if (logs.length > MAX_LOGS) logs.shift();

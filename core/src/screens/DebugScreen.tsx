@@ -9,10 +9,11 @@ import {
   TextInput,
   Clipboard,
   Alert,
+  Linking,
 } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
-import { getDebugLogs, dumpDatabase, clearAllTables, executeSql, fetchSupabaseTable, triggerSync, deleteSupabaseTable, deleteAllSupabaseTables, clearTable } from '../utils/databaseHelper';
+import { getDebugLogs, dumpDatabase, clearAllTables, executeSql, fetchSupabaseTable, triggerSync, triggerFullSync, deleteSupabaseTable, deleteAllSupabaseTables, clearTable } from '../utils/databaseHelper';
 import { getCapturedLogs } from '../utils/consoleCapture';
 import Icon from '../theme/Icon';
 
@@ -38,6 +39,7 @@ function DebugScreen() {
   const [tab, setTab] = useState<ScreenTab>('log');
   const [serverSub, setServerSub] = useState<ServerSub>('sqlite');
   const [nativeLogs, setNativeLogs] = useState<string[]>([]);
+  const [logFilter, setLogFilter] = useState<string | null>(null);
   const [jsLogs, setJsLogs] = useState<{ level: string; message: string; timestamp: string }[]>([]);
   const [sqlRows, setSqlRows] = useState<SqlRow[]>([]);
   const [sqlCols, setSqlCols] = useState<string[]>([]);
@@ -51,9 +53,14 @@ function DebugScreen() {
 
   const loadNativeLogs = useCallback(async () => {
     try {
-      setNativeLogs(await getDebugLogs(300));
+      const all = await getDebugLogs(300);
+      if (logFilter) {
+        setNativeLogs(all.filter(l => l.startsWith(logFilter)));
+      } else {
+        setNativeLogs(all);
+      }
     } catch {}
-  }, []);
+  }, [logFilter]);
 
   const loadJsLogs = useCallback(() => {
     setJsLogs(getCapturedLogs());
@@ -67,6 +74,19 @@ function DebugScreen() {
     else text = JSON.stringify(sqlRows, null, 2);
     if (Clipboard?.setString) { try { Clipboard.setString(text); } catch {} }
     Alert.alert('Đã copy', `${text.split('\n').length} dòng`);
+  }, [tab, serverSub, nativeLogs, jsLogs, sqlRows, supaRows]);
+
+  const handleSendToGdocs = useCallback(async () => {
+    let text = '';
+    if (tab === 'log') text = nativeLogs.join('\n');
+    else if (tab === 'js') text = jsLogs.map(l => `[${l.level.toUpperCase()}] ${l.timestamp} ${l.message}`).join('\n');
+    else if (serverSub === 'supabase') text = JSON.stringify(supaRows, null, 2);
+    else text = JSON.stringify(sqlRows, null, 2);
+    if (Clipboard?.setString) { try { Clipboard.setString(text); } catch {} }
+    const gdocUrl = 'https://docs.google.com/document/d/1wsjsV4Talux0SwYKz1qmFzPBuOMFlWAfU71jpa3Ta3o/edit';
+    const canOpen = await Linking.canOpenURL(gdocUrl);
+    if (canOpen) Linking.openURL(gdocUrl);
+    Alert.alert('Đã copy logs', `${text.split('\n').length} dòng — dán vào Google Docs đã mở`);
   }, [tab, serverSub, nativeLogs, jsLogs, sqlRows, supaRows]);
 
   const handleClearNative = useCallback(async () => {
@@ -184,11 +204,11 @@ function DebugScreen() {
   useEffect(() => { if (tab === 'server' && serverSub === 'sqlite' && !currentSql) runSql(PRESETS[0].sql); }, [tab, serverSub, currentSql, runSql]);
   useEffect(() => { if (tab === 'server' && serverSub === 'supabase' && !supaTable) fetchSupa(SUPABASE_PRESETS[0]); }, [tab, serverSub, supaTable, fetchSupa]);
 
-  const renderLog = ({ item }: { item: string }) => (
+  const renderLog = useCallback(({ item }: { item: string }) => (
     <Text style={styles.logLine}>{item}</Text>
-  );
+  ), []);
 
-  const renderJsLog = ({ item }: { item: { level: string; message: string; timestamp: string } }) => {
+  const renderJsLog = useCallback(({ item }: { item: { level: string; message: string; timestamp: string } }) => {
     const color = item.level === 'error' ? '#E74C3C' : item.level === 'warn' ? '#F39C12' : '#2ECC71';
     return (
       <View style={styles.jsLine}>
@@ -196,17 +216,27 @@ function DebugScreen() {
         <Text style={styles.jsMsg} numberOfLines={5}>{item.message}</Text>
       </View>
     );
-  };
+  }, []);
 
-  const renderTableRow = (cols: string[], item: SqlRow) => (
+  const renderSqlRow = useCallback(({ item }: { item: SqlRow }) => (
     <View style={styles.sqlRow}>
-      {cols.map(col => (
+      {sqlCols.map(col => (
         <Text key={col} style={styles.sqlCell} numberOfLines={2}>
           {item[col] === null || item[col] === undefined ? 'NULL' : String(item[col])}
         </Text>
       ))}
     </View>
-  );
+  ), [sqlCols]);
+
+  const renderSupaRow = useCallback(({ item }: { item: SqlRow }) => (
+    <View style={styles.sqlRow}>
+      {supaCols.map(col => (
+        <Text key={col} style={styles.sqlCell} numberOfLines={2}>
+          {item[col] === null || item[col] === undefined ? 'NULL' : String(item[col])}
+        </Text>
+      ))}
+    </View>
+  ), [supaCols]);
 
   const isServer = tab === 'server';
 
@@ -231,6 +261,9 @@ function DebugScreen() {
           )}
           <TouchableOpacity onPress={handleCopyAll} style={styles.headerBtn}>
             <Text style={styles.headerBtnText}>Copy</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleSendToGdocs} style={[styles.headerBtn, { backgroundColor: 'rgba(59,130,246,0.2)' }]}>
+            <Text style={{ color: '#3B82F6', fontSize: 13, fontWeight: '700' }}>GDocs</Text>
           </TouchableOpacity>
           {tab === 'log' && (
             <TouchableOpacity onPress={handleClearNative} style={styles.headerBtn}>
@@ -326,6 +359,9 @@ function DebugScreen() {
           <TouchableOpacity style={[styles.presetBtn, { backgroundColor: 'rgba(16,185,129,0.2)' }]} onPress={() => handleSyncThenFetch(supaTable || SUPABASE_PRESETS[0])}>
             <Text style={[styles.presetText, { color: '#10B981' }]}>Sync + Fetch</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={[styles.presetBtn, { backgroundColor: 'rgba(139,92,246,0.2)' }]} onPress={async () => { await triggerFullSync(); handleSyncThenFetch(supaTable || SUPABASE_PRESETS[0]); }}>
+            <Text style={[styles.presetText, { color: '#8B5CF6' }]}>Full Refresh</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={[styles.presetBtn, { backgroundColor: 'rgba(231,76,60,0.2)' }]} onPress={handleDeleteAllSupa}>
             <Text style={[styles.presetText, { color: '#E74C3C' }]}>Xoá tất cả</Text>
           </TouchableOpacity>
@@ -350,14 +386,29 @@ function DebugScreen() {
 
       {/* Content */}
       {tab === 'log' && (
-        <FlatList
-          ref={listRef}
-          data={nativeLogs}
-          keyExtractor={(_, i) => i.toString()}
-          renderItem={renderLog}
-          contentContainerStyle={styles.list}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-        />
+        <View style={{ flex: 1 }}>
+          <View style={[styles.presetBar, { borderBottomColor: 'rgba(255,255,255,0.08)' }]}>
+            {[null, '[SUPABASE]', '[SYNC]', '[DB]', '[ORT]'].map(f => (
+              <TouchableOpacity
+                key={f ?? 'all'}
+                style={[styles.presetBtn, logFilter === f && styles.presetBtnActive]}
+                onPress={() => setLogFilter(f)}
+              >
+                <Text style={[styles.presetText, logFilter === f && styles.presetTextActive]}>
+                  {f ?? 'ALL'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <FlatList
+            ref={listRef}
+            data={nativeLogs}
+            keyExtractor={(_, i) => i.toString()}
+            renderItem={renderLog}
+            contentContainerStyle={styles.list}
+            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          />
+        </View>
       )}
 
       {tab === 'js' && (
@@ -374,7 +425,7 @@ function DebugScreen() {
         <FlatList
           data={sqlRows}
           keyExtractor={(_, i) => i.toString()}
-          renderItem={({ item }) => renderTableRow(sqlCols, item)}
+          renderItem={renderSqlRow}
           contentContainerStyle={styles.list}
           ListEmptyComponent={<Text style={styles.emptyText}>No results</Text>}
         />
@@ -384,10 +435,10 @@ function DebugScreen() {
         <FlatList
           data={supaRows}
           keyExtractor={(_, i) => i.toString()}
-          renderItem={({ item }) => renderTableRow(supaCols, item)}
+          renderItem={renderSupaRow}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
-            <Text style={styles.emptyText}>{supaLoading ? 'Loading...' : 'No results'}</Text>
+            <Text style={styles.emptyText}>{supaLoading ? 'Loading...' : 'No results — có thể do RLS chặn, thử Full Refresh'}</Text>
           }
         />
       )}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Switch, StatusBar, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Switch, StatusBar, Alert } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { useTheme } from '../theme/ThemeContext';
 import { useNavigation } from '@react-navigation/native';
@@ -20,6 +20,7 @@ function SettingsScreen() {
   const [sndEnabled, setSndEnabled] = useState(true);
   const [sndVolume, setSndVolume] = useState(80);
   const [showCharBboxes, setShowCharBboxes] = useState(false);
+  const [feePerHour, setFeePerHour] = useState('10000');
 
   function confirmDelete() {
     Alert.alert(
@@ -34,18 +35,20 @@ function SettingsScreen() {
 
   useEffect(() => {
     (async () => {
-      const [vib, snd, v, s, charBbox] = await Promise.all([
+      const [vib, snd, v, s, charBbox, fee] = await Promise.all([
         getSettingBool('vibration_enabled'),
         getSettingBool('sound_enabled'),
         getSettingInt('vibration_duration'),
         getSettingInt('sound_volume'),
         getSettingBool('show_char_bboxes'),
+        getSettingInt('fee_per_hour'),
       ]);
       setVibEnabled(vib !== false);
       setSndEnabled(snd !== false);
       if (v !== null) setVibDuration(v);
       if (s !== null) setSndVolume(s);
       setShowCharBboxes(charBbox === true);
+      setFeePerHour(fee !== null ? String(fee) : '10000');
     })();
   }, []);
 
@@ -168,6 +171,32 @@ function SettingsScreen() {
           />
         </View>
       </View>
+
+      <View style={s.section}>
+        <Text style={[s.sectionTitle, { color: colors.textMuted }]}>PHÍ GIỮ XE</Text>
+        <View style={[s.card, { backgroundColor: colors.cardBg, borderColor: colors.cardBorder }]}>
+          <View style={s.feeRow}>
+            <Text style={[s.feeLabel, { color: colors.text }]}>Phí mỗi giờ (VNĐ)</Text>
+            <TextInput
+              style={[s.feeInput, { backgroundColor: colors.inputBg, color: colors.text, borderColor: colors.inputBorder }]}
+              value={feePerHour}
+              onChangeText={setFeePerHour}
+              keyboardType="numeric"
+              placeholder="10000"
+              placeholderTextColor={colors.textMuted}
+              onEndEditing={async () => {
+                const val = parseInt(feePerHour, 10);
+                if (!isNaN(val) && val > 0) {
+                  await setSettingInt('fee_per_hour', val);
+                } else {
+                  setFeePerHour('10000');
+                  await setSettingInt('fee_per_hour', 10000);
+                }
+              }}
+            />
+          </View>
+        </View>
+      </View>
     </View>
   );
 }
@@ -213,6 +242,9 @@ const s = StyleSheet.create({
   slider: { flex: 1, height: 40 },
   sliderLabel: { fontSize: 12, fontWeight: '600', minWidth: 30, textAlign: 'center' },
   divider: { height: 1, marginHorizontal: 16 },
+  feeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 },
+  feeLabel: { fontSize: 15, fontWeight: '500' },
+  feeInput: { width: 120, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, fontSize: 16, fontWeight: '600', textAlign: 'right' },
 });
 
 export default SettingsScreen;

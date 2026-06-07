@@ -2,8 +2,15 @@ import React from 'react';
 import { render } from '@testing-library/react-native';
 import ExitScreen from '../src/screens/ExitScreen';
 
+jest.mock('../src/context/SessionContext', () => ({
+  useSession: () => ({ session: null, loading: false }),
+  SessionProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 jest.mock('../src/utils/databaseHelper', () => ({
+  getSettingBool: jest.fn(),
   notifySuccess: jest.fn(),
+  searchParkingLogs: jest.fn(),
 }));
 
 jest.mock('../src/utils/plateHelper', () => ({

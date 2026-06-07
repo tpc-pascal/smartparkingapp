@@ -15,7 +15,7 @@ jest.mock('../src/utils/nfcHelper', () => ({
 jest.mock('../src/utils/databaseHelper', () => ({
   recordEntryFull: jest.fn(),
   recordExitFull: jest.fn(),
-  notifySuccess: jest.fn(),
+  notifySuccess: jest.fn().mockResolvedValue(undefined),
   searchParkingLogs: jest.fn(),
 }));
 

@@ -4,9 +4,10 @@ import HomeScreen from '../src/screens/HomeScreen';
 
 jest.mock('../src/utils/databaseHelper', () => ({
   getTodayStats: jest.fn(),
-  getCurrentlyParked: jest.fn(),
-  isOnline: jest.fn(),
+  searchParkingLogs: jest.fn(),
   getRemainingCount: jest.fn(),
+  getSettingInt: jest.fn(),
+  getParkingLogsBySession: jest.fn(),
 }));
 
 const mockLogout = jest.fn();
@@ -62,10 +63,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockSession = { id: 1, name: 'Phiên 31/05/2026 #1', status: 'active', createdAt: '2026-05-31T10:00:00Z' };
   db.getTodayStats.mockResolvedValue({ entryCount: 5, exitCount: 3, parkedCount: 2 });
-  db.getCurrentlyParked.mockResolvedValue([
-    { id: 1, licensePlate: '59A12345', timeIn: '2026-05-31T10:00:00Z', attendantId: 1 },
+  db.searchParkingLogs.mockResolvedValue([
+    { id: 1, licensePlate: '59A12345', timeIn: '2026-05-31T10:00:00Z', sessionId: 1 },
   ]);
-  db.isOnline.mockResolvedValue(true);
+  db.getSettingInt.mockResolvedValue(10000);
 });
 
 it('renders greeting with user name', async () => {
@@ -77,8 +78,6 @@ it('renders greeting with user name', async () => {
 it('renders stats cards with values', async () => {
   const { getByText } = render(<HomeScreen />);
   await act(() => Promise.resolve());
-  expect(getByText('5')).toBeTruthy();
-  expect(getByText('3')).toBeTruthy();
   expect(getByText('2')).toBeTruthy();
 });
 
@@ -103,6 +102,6 @@ it('shows only create button when no session', async () => {
   expect(getByText('Tạo phiên')).toBeTruthy();
   expect(queryByText('Quét xe vào')).toBeNull();
   expect(queryByText('Quét xe ra')).toBeNull();
-  expect(queryByText('Lịch sử')).toBeNull();
-  expect(queryByText('Xe đang trong bãi')).toBeNull();
+  expect(getByText('Lịch sử')).toBeTruthy();
+  expect(queryByText('Danh sách xe')).toBeNull();
 });
